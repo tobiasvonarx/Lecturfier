@@ -2,9 +2,9 @@ import math
 import random
 from sqlite3 import Error
 
-import discord
-from discord.ext import commands, tasks
-from discord.ext.commands.cooldowns import BucketType
+import nextcord
+from nextcord.ext import commands, tasks
+from nextcord.ext.commands.cooldowns import BucketType
 
 from helper.sql import SQLFunctions
 
@@ -69,7 +69,7 @@ class Voice(commands.Cog):
                     if not (u.voice.afk or u.bot or u.voice.self_mute or u.voice.self_deaf or u.voice.mute):
                         await self.add_xp(u, amount_min, amount_max)
 
-    async def add_xp(self, member: discord.Member, amount_min, amount_max):
+    async def add_xp(self, member: nextcord.Member, amount_min, amount_max):
         """
         Adds xp to a specific user in that guild
         :param member:
@@ -103,7 +103,7 @@ class Voice(commands.Cog):
         level = levefier(voice_level.experience)
         pre_level = round(voice_level.experience - xpfier(level))
         aft_level = round(xpfier(level + 1) - xpfier(level))
-        embed = discord.Embed(title="Voice Level", description=f"User: <@!{voice_level.member.DiscordUserID}>\n"
+        embed = nextcord.Embed(title="Voice Level", description=f"User: <@!{voice_level.member.DiscordUserID}>\n"
                                                                f"Current Level: `{level}`\n"
                                                                f"Level XP: `{pre_level}` / `{aft_level}`\n"
                                                                f"Total XP: `{number_split(voice_level.experience)}`\n"
@@ -155,7 +155,7 @@ class Voice(commands.Cog):
                     guild_name = ctx.message.guild.name
                 except AttributeError:
                     guild_name = "DM Channel"
-                embed = discord.Embed(
+                embed = nextcord.Embed(
                     title=f"Top Levels of: **{guild_name}** <a:upvoteparrot:412336233105326091>",
                     description=cont, color=0x00FF00)
                 await ctx.send(embed=embed)

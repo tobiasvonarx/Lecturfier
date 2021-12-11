@@ -2,9 +2,9 @@ import asyncio
 import random
 import time
 
-import discord
-from discord.ext import commands
-from discord.ext.commands.cooldowns import BucketType
+import nextcord
+from nextcord.ext import commands
+from nextcord.ext.commands.cooldowns import BucketType
 
 
 class Minesweeper(commands.Cog):
@@ -104,7 +104,7 @@ class Minesweeper(commands.Cog):
             await asyncio.sleep(1)
             await ctx.send("❗❗ Already sending a mine field. Hold on ❗❗", delete_after=7)
             await ctx.message.delete()
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         self.sending = True
         try:
@@ -114,7 +114,7 @@ class Minesweeper(commands.Cog):
                 await ctx.send("Too big of a mine field to send on discord. Keep it under 20.", delete_after=7)
                 await ctx.message.delete()
                 self.sending = False
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
 
         except ValueError:
             try:
@@ -133,7 +133,7 @@ class Minesweeper(commands.Cog):
                 await ctx.send("Wrong input. Use `$minesweeper <size> <mines>`", delete_after=7)
                 await ctx.message.delete()
                 self.sending = False
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
         placed_bombs = await self.bomb_placer(size=int(size), mines=int(mines))
         mine_field = placed_bombs[0]
         corrected_size = placed_bombs[1]
@@ -164,9 +164,9 @@ class Minesweeper(commands.Cog):
             if len(final_message) <= 1:
                 return
             await ctx.send(final_message)
-        except discord.errors.HTTPException:
+        except nextcord.errors.HTTPException:
             await ctx.send("Too big of a mine field to send on discord.")
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
 
 def setup(bot):

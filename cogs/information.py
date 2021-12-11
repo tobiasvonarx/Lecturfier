@@ -11,11 +11,11 @@ import json
 from cogs.quote import Pages
 import os
 
-import discord
+import nextcord
 import psutil
-from discord.ext import commands, tasks
-from discord.ext.commands import has_permissions
-from discord.ext.commands.cooldowns import BucketType
+from nextcord.ext import commands, tasks
+from nextcord.ext.commands import has_permissions
+from nextcord.ext.commands.cooldowns import BucketType
 from pytz import timezone
 
 from helper.sql import SQLFunctions
@@ -63,7 +63,7 @@ def is_valid_date(date, time_inp):
     if date["year"] < cur_year:
         # Year is passed
         if cur_year + 5 >= date["year"] + 2000 >= cur_year:
-            date["year"] = date["year"]+2000
+            date["year"] = date["year"] + 2000
         else:
             return False
     if date["year"] == cur_year:
@@ -131,7 +131,7 @@ def create_event_embed(event: SQLFunctions.Event, joined_members: list):
         joined_users_msg += f"\n> <@{member.DiscordUserID}>"
         counter += 1
     # Creates and returns the embed message
-    embed = discord.Embed(title="Updating Event View", color=0xFCF4A3)
+    embed = nextcord.Embed(title="Updating Event View", color=0xFCF4A3)
     embed.set_footer(text=f"Join this event with $event join {event.EventID}")
     add_event_fields(embed, event, joined_users_msg)
     return embed
@@ -157,8 +157,7 @@ class Information(commands.Cog):
         self.background_events.start()
         # emote used for adding users to an event
         self.emote = ":greenverify:829432586098049034"
-        
-        
+
         # AoC specific things
         self.aoc_path = "./data/aoc_data.json"
         self.background_fetch_aoc.start()
@@ -192,13 +191,13 @@ class Information(commands.Cog):
                     msg = await channel.fetch_message(event.UpdatedMessageID)
                     embed = create_event_embed(event, joined_members)
                     await msg.edit(embed=embed)
-                except (discord.NotFound, discord.errors.Forbidden):
+                except (nextcord.NotFound, nextcord.errors.Forbidden):
                     print(f"Have no access to the events update message for the event with ID {event.EventID}.")
                     continue
             # ping users if event starts
             if event.EventStartingAt <= current_time:
                 # creates the embed for the starting event
-                embed = discord.Embed(
+                embed = nextcord.Embed(
                     title="Event Starting!",
                     description=f"`{event.EventName}` is starting! Here just a few details of the event:",
                     color=0xFCF4A3)
@@ -213,7 +212,7 @@ class Information(commands.Cog):
                         continue
                     try:
                         await user.send(embed=embed)
-                    except discord.Forbidden:
+                    except nextcord.Forbidden:
                         print(f"Can't dm {user.name}")
         # Marks all older events as done
         SQLFunctions.mark_events_done(current_time, conn=self.conn)
@@ -236,7 +235,6 @@ class Information(commands.Cog):
                     with open(self.aoc_path, "w") as f:
                         json.dump(self.data, f)
                     print("Successfully updated the AoC data.")
-                    
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -270,12 +268,12 @@ class Information(commands.Cog):
             return False
         try:
             await self.set_event_channel_perms(member, event.SpecificChannelID, command)
-        except discord.Forbidden:
+        except nextcord.Forbidden:
             pass
         return event
 
     @commands.Cog.listener()
-    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+    async def on_raw_reaction_add(self, payload: nextcord.RawReactionActionEvent):
         if payload.guild_id is None or payload.channel_id is None or payload.member is None or payload.message_id is None:
             return
         # return if its the bot itself
@@ -288,11 +286,11 @@ class Information(commands.Cog):
                 return
             try:
                 await payload.member.send(f"Added you to the event **{event.EventName}**")
-            except discord.Forbidden:
+            except nextcord.Forbidden:
                 pass
 
     @commands.Cog.listener()
-    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+    async def on_raw_reaction_remove(self, payload: nextcord.RawReactionActionEvent):
         if payload.guild_id is None or payload.channel_id is None or payload.user_id is None:
             return
         # return if its the bot itself
@@ -312,7 +310,7 @@ class Information(commands.Cog):
             try:
                 user = self.bot.get_user(payload.user_id)
                 await user.send(f"Removed you from the event **{event.EventName}**")
-            except discord.Forbidden:
+            except nextcord.Forbidden:
                 pass
 
     @commands.guild_only()
@@ -327,62 +325,62 @@ class Information(commands.Cog):
         desc = f"Last Updated: `{get_formatted_time(int(time.time() - self.last_updated))}` ago"
         if day is None or day == "0" and star is None:  # send the general lb
             pages = []
-            members = [d["members"][key] for key in d["members"] 
-                       if len(d["members"][key]["completion_day_level"])>0]
-            
+            members = [d["members"][key] for key in d["members"]
+                       if len(d["members"][key]["completion_day_level"]) > 0]
+
             points_fn = lambda k: k["local_score"]
             members.sort(key=points_fn, reverse=True)
-             
+
             msg = []
             for i, m in enumerate(members):
-                msg.append(f"`[{i+1}]` **{m['name']}** - {m['local_score']} points | {m['stars']} stars")
+                msg.append(f"`[{i + 1}]` **{m['name']}** - {m['local_score']} points | {m['stars']} stars")
             pages = self.create_pages("\n".join(msg), 500)
-            
+
             menu = Pages(self.bot, ctx, pages, ctx.author.id, "Total AoC Leaderboard", description=desc)
             await menu.handle_pages()
-        elif star is None and day.isnumeric() and 1<=int(day)<=25:  # send the lb for that day
-            
+        elif star is None and day.isnumeric() and 1 <= int(day) <= 25:  # send the lb for that day
+
             day = int(day)
             pages = []
             members = [d["members"][key] for key in d["members"]
-                       if len(d["members"][key]["completion_day_level"])>0 
+                       if len(d["members"][key]["completion_day_level"]) > 0
                        and f"{day}" in d["members"][key]["completion_day_level"]]
-            
+
             members, points = self.sort_by_times(members, len(d["members"]), day)
             msg = []
             for i, m in enumerate(members):
-                msg.append(f"`[{i+1}]` **{d['members'][m]['name']}** - {points[d['members'][m]['id']]} points")
+                msg.append(f"`[{i + 1}]` **{d['members'][m]['name']}** - {points[d['members'][m]['id']]} points")
             pages = self.create_pages("\n".join(msg), 500)
-            
+
             if len(pages) > 0:
                 menu = Pages(self.bot, ctx, pages, ctx.author.id, f"Day {day} AoC Leaderboard", description=desc)
                 await menu.handle_pages()
             else:
                 await ctx.reply("There are no stats for that day yet.", delete_after=10)
                 await ctx.message.delete(delay=10)
-        elif day.isnumeric() and 1<=int(day)<=25 and star in ["1", "2"]:  # sends the lb for that day and star
+        elif day.isnumeric() and 1 <= int(day) <= 25 and star in ["1", "2"]:  # sends the lb for that day and star
             day = int(day)
             star = int(star)
             pages = []
             members = [d["members"][key] for key in d["members"]
-                       if len(d["members"][key]["completion_day_level"])>0
+                       if len(d["members"][key]["completion_day_level"]) > 0
                        and f"{day}" in d["members"][key]["completion_day_level"]
                        and f"{star}" in d["members"][key]["completion_day_level"][f"{day}"]]
-            
+
             points_fn = lambda m: m["completion_day_level"][f"{day}"][f"{star}"]["get_star_ts"]
             members.sort(key=points_fn)
-            
+
             min_hour = 0
             if len(members) > 0:
                 # round down minimum time to hour
                 min_hour = members[0]["completion_day_level"][f"{day}"][f"{star}"]["get_star_ts"] // 3600 * 3600
-            
+
             msg = []
             for i, m in enumerate(members):
-                form = get_formatted_time(m['completion_day_level'][f'{day}'][f'{star}']['get_star_ts']-min_hour)
-                msg.append(f"`[{i+1}]` **{m['name']}** - {form}")
+                form = get_formatted_time(m['completion_day_level'][f'{day}'][f'{star}']['get_star_ts'] - min_hour)
+                msg.append(f"`[{i + 1}]` **{m['name']}** - {form}")
             pages = self.create_pages("\n".join(msg), 500)
-            
+
             if len(pages) > 0:
                 menu = Pages(self.bot, ctx, pages, ctx.author.id, f"Day {day} Star {star} AoC Leaderboard", description=desc)
                 await menu.handle_pages()
@@ -392,27 +390,26 @@ class Information(commands.Cog):
         else:
             await ctx.reply("Unrecognized command parameters. Please check the help page.", delete_after=10)
             await ctx.message.delete(delay=10)
-    
+
     def sort_by_times(self, members: list, total: int, day: int):
-        points = {m["id"]:0 for m in members}
+        points = {m["id"]: 0 for m in members}
         first_star = [m for m in members if "1" in m["completion_day_level"][f"{day}"]]
         second_star = [m for m in members if "2" in m["completion_day_level"][f"{day}"]]
-        
+
         # sort by the person's submission time (earliest times at the end)
         sort_fn1 = lambda m: m["completion_day_level"][f"{day}"]["1"]["get_star_ts"]
         sort_fn2 = lambda m: m["completion_day_level"][f"{day}"]["2"]["get_star_ts"]
         first_star.sort(key=sort_fn1)
         second_star.sort(key=sort_fn2)
-        
+
         for i, m in enumerate(first_star):
             points[m["id"]] = total - i
         for i, m in enumerate(second_star):
             points[m["id"]] += total - i
-        
-        final = sorted(points, key= lambda x: points[x], reverse=True)  # sorted by final points
+
+        final = sorted(points, key=lambda x: points[x], reverse=True)  # sorted by final points
         return final, points
-        
-    
+
     def create_pages(self, msg: str, CHAR_LIMIT: int) -> list[str]:
         pages = []
         while len(msg) > 0:
@@ -430,7 +427,7 @@ class Information(commands.Cog):
             pages.append(msg[0:rind2])
             msg = msg[rind2:]
         return pages
-    
+
     @commands.cooldown(4, 10, BucketType.user)
     @commands.command(usage="guild")
     async def guild(self, ctx):
@@ -438,7 +435,7 @@ class Information(commands.Cog):
         Used to display information about the server.
         """
         guild = ctx.message.guild
-        embed = discord.Embed(title=f"Guild Statistics", color=discord.colour.Color.dark_blue())
+        embed = nextcord.Embed(title=f"Guild Statistics", color=nextcord.colour.Color.dark_blue())
         embed.add_field(name="Categories", value=f"Server Name:\n"
                                                  f"Server ID:\n"
                                                  f"Member Count:\n"
@@ -474,10 +471,10 @@ class Information(commands.Cog):
             cont = f"**Instance uptime: **`{b_time}`\n" \
                    f"**Computer uptime: **`{s_time}`\n" \
                    f"**CPU: **`{round(cpu)}%` | **RAM: **`{round(ram.percent)}%`\n" \
-                   f"**Discord.py Version:** `{discord.__version__}`\n" \
+                   f"**nextcord Version:** `{nextcord.__version__}`\n" \
                    f"**Bot source code:** [Click here for source code](https://github.com/markbeep/Lecturfier)"
-            embed = discord.Embed(title="Bot Information:", description=cont, color=0xD7D7D7,
-                                  timestamp=datetime.now(timezone("Europe/Zurich")))
+            embed = nextcord.Embed(title="Bot Information:", description=cont, color=0xD7D7D7,
+                                   timestamp=datetime.now(timezone("Europe/Zurich")))
             embed.set_footer(text=f"Called by {ctx.author.display_name}")
             embed.set_thumbnail(url=self.bot.user.avatar_url)
             embed.set_author(name=self.bot.user.display_name, icon_url=self.bot.user.avatar_url)
@@ -490,7 +487,7 @@ class Information(commands.Cog):
         Sends a bot token.
         """
         token = random_string(24) + "." + random_string(6) + "." + random_string(27)
-        embed = discord.Embed(title="Bot Token", description=f"||`{token}`||")
+        embed = nextcord.Embed(title="Bot Token", description=f"||`{token}`||")
         await ctx.send(embed=embed)
 
     @commands.cooldown(4, 10, BucketType.user)
@@ -509,16 +506,17 @@ class Information(commands.Cog):
         start = time.perf_counter()
         await ctx.trigger_typing()
         end = time.perf_counter()
-        embed = discord.Embed(
+        embed = nextcord.Embed(
             title=f"{title} 🏓",
             description=f"🌐 Ping: `{round((end - start) * 1000)}` ms\n"
                         f"❤ HEARTBEAT: `{round(self.bot.latency * 1000)}` ms",
             color=0xD7D7D7
-            )
+        )
         await ctx.send(embed=embed)
 
     @commands.guild_only()
-    @commands.group(aliases=["events"], usage="event [add/view/edit/delete/join/leave] [event name/event ID] [date] [time] [description]", invoke_without_command=True)
+    @commands.group(aliases=["events"], usage="event [add/view/edit/delete/join/leave] [event name/event ID] [date] [time] [description]",
+                    invoke_without_command=True)
     async def event(self, ctx, command=None):
         """
         The event command is used to keep track of upcoming events. Each user can add a maximum of two events.
@@ -528,7 +526,7 @@ class Information(commands.Cog):
         if command is None:
             # list all upcoming events sorted by upcoming order
             event_results = SQLFunctions.get_events(self.conn, is_done=False, guild_id=ctx.message.guild.id, order=True, limit=10)
-            embed = discord.Embed(title=f"Upcoming Events On {ctx.message.guild.name}", color=0xFCF4A3)
+            embed = nextcord.Embed(title=f"Upcoming Events On {ctx.message.guild.name}", color=0xFCF4A3)
             embed.set_footer(text="$event view <ID> to get more details about an event")
             for event in event_results:
                 form_time = starting_in(event.EventStartingAt)
@@ -542,7 +540,7 @@ class Information(commands.Cog):
             await ctx.send(f"ERROR! {ctx.message.author.mention}, the command you used is not recognized. Check `$help event` to get more "
                            f"info about the event command.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
     @commands.guild_only()
     @event.command(usage="add <event name> <date> <event time> [description]")
@@ -569,20 +567,20 @@ class Information(commands.Cog):
                 await ctx.send("ERROR! Incorrect arguments given. Check `$help event` to get more "
                                f"info about the event command.", delete_after=10)
                 await ctx.message.delete(delay=10)
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
             date = format_input_date(date, event_time)
             if not date:
                 await ctx.send(
                     "ERROR! Incorrect date format given or date is passed. Should be `DD.MM.YYYY` or `DD-MM-YYYY`. Check `$help event` to get more "
                     f"info about the event command. Event has to start minimum the next minute.", delete_after=10)
                 await ctx.message.delete(delay=10)
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
             event_time = format_input_time(event_time)
             if not event_time:
                 await ctx.send("ERROR! Incorrect time format given. Should be `HH:MM`. Check `$help event` to get more "
                                f"info about the event command.", delete_after=10)
                 await ctx.message.delete(delay=10)
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
             # Adds the entry to the sql db
             if len(event_description) > 700:
                 event_description = event_description[0: 700] + "..."
@@ -596,7 +594,7 @@ class Information(commands.Cog):
                     "ERROR! Incorrect date format given or date is passed. Should be `DD.MM.YYYY` or `DD-MM-YYYY`. Check `$help event` to get more "
                     f"info about the event command.", delete_after=10)
                 await ctx.message.delete(delay=10)
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
 
             # Inserts event into event database
             member = SQLFunctions.get_or_create_discord_member(ctx.message.author, conn=self.conn)
@@ -605,7 +603,7 @@ class Information(commands.Cog):
             SQLFunctions.add_member_to_event(event, member, self.conn, host=True)
 
             # Creates and sends the embed message
-            embed = discord.Embed(title="Added New Event", color=0xFCF4A3)
+            embed = nextcord.Embed(title="Added New Event", color=0xFCF4A3)
             embed.add_field(name="Event ID", value=event.EventID)
             embed.add_field(name="Event Name", value=event_name, inline=False)
             embed.add_field(name="Event Host", value=ctx.message.author.mention, inline=False)
@@ -615,7 +613,7 @@ class Information(commands.Cog):
         else:
             await ctx.send("ERROR! Each member can only add **three** events as of now.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
     @commands.guild_only()
     @event.command(usage="view <event name / ID>")
@@ -632,7 +630,7 @@ class Information(commands.Cog):
             await ctx.send(f"ERROR! {ctx.message.author.mention}, you did not specify what event to view. Check `$help event` to get more "
                            f"info about the event command.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         else:
             events = SQLFunctions.get_events(self.conn, guild_id=ctx.message.guild.id, order=True)
             event_results = []
@@ -643,9 +641,9 @@ class Information(commands.Cog):
                 await ctx.send("ERROR! There is no event with a similar name. Simply type `$event` to get a list of upcoming events.",
                                delete_after=10)
                 await ctx.message.delete(delay=10)
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
 
-            embed = discord.Embed(title="Indepth Event View", color=0xFCF4A3)
+            embed = nextcord.Embed(title="Indepth Event View", color=0xFCF4A3)
             embed.set_footer(text="Join an event with $event join <ID>")
             if len(event_results) > 2:
                 embed.add_field(name="NOTICE",
@@ -688,7 +686,7 @@ class Information(commands.Cog):
         """
         if event_id is None:
             await ctx.send("ERROR! No Event ID given. Don't know what event I should delete <:NotLikeThis:852170634439032873>")
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         event_results = SQLFunctions.get_events(self.conn, guild_id=ctx.message.guild.id)
         for e in event_results:
             if str(e.EventID) == event_id:
@@ -696,15 +694,15 @@ class Information(commands.Cog):
                 break
         else:
             await ctx.send(f"ERROR! No event found with the given ID `{event_id}`.")
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         if event.DiscordMember.DiscordUserID != ctx.message.author.id:
             await ctx.send(f"ERROR! You are not the host of the given event ID. You can't delete other people's events.")
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         SQLFunctions.delete_event(event, self.conn)
-        embed = discord.Embed(title="Deleted Event",
-                              description=f"**Name of deleted event:** {event.EventName}\n"
-                                          f"**Event host:** {ctx.message.author.mention}",
-                              color=0xFCF4A3)
+        embed = nextcord.Embed(title="Deleted Event",
+                               description=f"**Name of deleted event:** {event.EventName}\n"
+                                           f"**Event host:** {ctx.message.author.mention}",
+                               color=0xFCF4A3)
         await ctx.send(embed=embed)
 
     @commands.guild_only()
@@ -725,19 +723,19 @@ class Information(commands.Cog):
         if event_id is None:
             await ctx.send(f"ERROR! {ctx.message.author.mention}, you did not specify what event to {command}.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         if not event_id.isnumeric():
             await ctx.send(f"ERROR! {ctx.message.author.mention}, the given event ID is not an integer.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         event = SQLFunctions.get_event_by_id(int(event_id), self.conn)
         if event is None:
             await ctx.send(f"ERROR! {ctx.message.author.mention}, could not find an event with that ID.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         success = await self.join_leave_event(ctx.message.author, ctx.message.guild.id, command, event_id=event.EventID)
         if success and command == "join":
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Joined Event",
                 description=f"Added {ctx.message.author.mention} to event `{event.EventName}`."
                             f"You can leave the event with `$event leave {event.EventID}`",
@@ -747,12 +745,12 @@ class Information(commands.Cog):
             if event.SpecificChannelID is not None:
                 try:
                     await self.set_event_channel_perms(ctx.message.author, event.SpecificChannelID, "join")
-                except discord.Forbidden:
+                except nextcord.Forbidden:
                     await ctx.send("Couldn't add you to the channel. Best to tag Mark.")
                 except AttributeError:
                     await ctx.send("I can't see the event channel anymore. Can't add you :'(\nBest to tag Mark.")
         elif success and command == "leave":
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Left Event",
                 description=f"Removed {ctx.message.author.mention} from the event `{event.EventName}`."
                             f"You can join the event again with `$event join {event.EventID}`",
@@ -762,7 +760,7 @@ class Information(commands.Cog):
             if event.SpecificChannelID is not None:
                 try:
                     await self.set_event_channel_perms(ctx.message.author, event.SpecificChannelID, "leave")
-                except discord.Forbidden:
+                except nextcord.Forbidden:
                     await ctx.send("Couldn't remove you from the channel. Best to tag Mark.")
                 except AttributeError:
                     await ctx.send("I can't see the event channel anymore, so I can't remove you from it :'(\nBest to tag Mark.")
@@ -804,17 +802,17 @@ class Information(commands.Cog):
         if event_id is None:
             await ctx.send(f"ERROR! {ctx.message.author.mention}, you did not specify what event to create an updating message for.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         if not event_id.isnumeric():
             await ctx.send(f"ERROR! {ctx.message.author.mention}, the given event ID is not an integer.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         # Checks if the Event exists
         event = SQLFunctions.get_event_by_id(int(event_id), self.conn)
         if event is None:
             await ctx.send(f"ERROR! {ctx.message.author.mention}, could not find an event with that ID.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # Checks if there already exists an updating message, if there does, deletes old one
         if event.UpdatedChannelID is not None:
@@ -822,7 +820,7 @@ class Information(commands.Cog):
                 channel = self.bot.get_channel(event.UpdatedChannelID)
                 msg_to_delete = await channel.fetch_message(event.UpdatedMessageID)
                 await msg_to_delete.delete()
-            except (discord.NotFound, AttributeError):
+            except (nextcord.NotFound, AttributeError):
                 pass
 
         # Creates embed and sends the message
@@ -851,18 +849,18 @@ class Information(commands.Cog):
             await ctx.send(f"ERROR! {ctx.message.author.mention}, you did not specify what event to create an updating message for.",
                            delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # Checks if the Event exists
         if not event_id.isnumeric():
             await ctx.send(f"ERROR! {ctx.message.author.mention}, the given event ID is not an integer.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         event = SQLFunctions.get_event_by_id(int(event_id), self.conn)
         if event is None:
             await ctx.send(f"ERROR! {ctx.message.author.mention}, could not find an event with that ID.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # if no channel is given, clears the channel
         if channel_id is None:
@@ -873,7 +871,7 @@ class Information(commands.Cog):
         if not channel_id.isnumeric():
             await ctx.send("ERROR! Channel ID is not a valid integer.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # Gets the channel and makes sure the ID is valid
         channel_id = int(channel_id)
@@ -882,14 +880,15 @@ class Information(commands.Cog):
             await ctx.send(f"ERROR! {ctx.message.author.mention}, the channel ID you specified is invalid or I don't have access to the channel.",
                            delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # Checks own permissions in that channel
         permissions = channel.permissions_for(ctx.message.guild.me)
         if not permissions.manage_channels:
-            await ctx.send(f"ERROR! {ctx.message.author.mention}, I don't have the permissions to change permissions on that channel.", delete_after=10)
+            await ctx.send(f"ERROR! {ctx.message.author.mention}, I don't have the permissions to change permissions on that channel.",
+                           delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         SQLFunctions.set_specific_event_channel(event.EventID, channel.id, self.conn)
 
@@ -917,23 +916,24 @@ class Information(commands.Cog):
             await ctx.send(f"ERROR! {ctx.message.author.mention}, you did not specify what event to ping users on.",
                            delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         if not event_id.isnumeric():
             await ctx.send(f"ERROR! {ctx.message.author.mention}, the given event ID is not an integer.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         event = SQLFunctions.get_event_by_id(event_id, self.conn)
         if event is None:
             await ctx.send(f"ERROR! {ctx.message.author.mention}, could not find an event with that ID.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         joined_members = SQLFunctions.get_event_joined_users(event, self.conn)
         if len(joined_members) == 0:
-            await ctx.send(f"ERROR! {ctx.message.author.mention}, could not find an event with that ID or the event has no joined users.", delete_after=10)
+            await ctx.send(f"ERROR! {ctx.message.author.mention}, could not find an event with that ID or the event has no joined users.",
+                           delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         ping_msg = ""
         event_name = event.EventName
@@ -944,7 +944,7 @@ class Information(commands.Cog):
             await ctx.send(f"ERROR! {ctx.message.author.mention}, you are not in the event. Can't ping it then.",
                            delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         await ctx.send(f"Mass event ping by {ctx.message.author.mention} for the event **{event_name}**\n||{ping_msg}||")
 
@@ -957,23 +957,23 @@ class Information(commands.Cog):
             await ctx.send(f"ERROR! {ctx.message.author.mention}, you did not specify what event to ping users on.",
                            delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         if not event_id.isnumeric():
             await ctx.send(f"ERROR! {ctx.message.author.mention}, the given event ID is not an integer.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         event = SQLFunctions.get_event_by_id(event_id, self.conn)
         if event is None:
             await ctx.send(f"ERROR! {ctx.message.author.mention}, could not find an event with that ID.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         joined_members: list[SQLFunctions.DiscordMember] = SQLFunctions.get_event_joined_users(event, self.conn)
         if len(joined_members) == 0:
             await ctx.send(f"ERROR! {ctx.message.author.mention}, the event has no joined users.", delete_after=10)
             await ctx.message.delete(delay=10)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         all_columns = []
         event_name = event.EventName
@@ -994,7 +994,7 @@ class Information(commands.Cog):
             single_column.append(f"* {username}".replace("`", "").replace("\\", ""))
         if len(single_column) > 0:
             all_columns.append(single_column)
-        embed = discord.Embed(
+        embed = nextcord.Embed(
             title=f"List of Members in Event {event_id}",
             description=f"All members in {event_name}:",
             color=0xFCF4A3

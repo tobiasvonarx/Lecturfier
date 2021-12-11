@@ -1,7 +1,7 @@
 import random
 
-import discord
-from discord.ext import commands
+import nextcord
+from nextcord.ext import commands
 
 from helper import file_creator
 from helper.log import log
@@ -48,8 +48,8 @@ class MainBot(commands.Cog):
         log("Logged in as:")
         log(f"Name: {self.bot.user.name}")
         log(f"ID: {self.bot.user.id}")
-        log(f"Version: {discord.__version__}")
-        await self.bot.change_presence(activity=discord.Activity(name=random.choice(self.watching_messages), type=discord.ActivityType.watching))
+        log(f"Version: {nextcord.__version__}")
+        await self.bot.change_presence(activity=nextcord.Activity(name=random.choice(self.watching_messages), type=nextcord.ActivityType.watching))
         print("-------------")
         count = await self.load_all_extensions(self.startup_extensions)
         log(f"Started up bot with {count}/{len(self.startup_extensions)-2} extensions loaded successfully.")
@@ -62,7 +62,7 @@ class MainBot(commands.Cog):
                 loaded_cog = self.bot.load_extension("cogs." + extension)
                 log("Loaded extension \"{}\".".format(extension))
                 count += 1
-            except discord.ext.commands.errors.ExtensionAlreadyLoaded:
+            except nextcord.ext.commands.errors.ExtensionAlreadyLoaded:
                 pass
             except Exception as e:
                 log("Failed loading extension \"{}\"\n-{}: {}".format(extension, e, type(e)), print_it=True, warning=True)

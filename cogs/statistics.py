@@ -2,10 +2,10 @@ import json
 import time
 from datetime import datetime
 
-import discord
-from discord.ext import commands, tasks
-from discord.ext.commands import CheckFailure, CommandOnCooldown
-from discord.ext.commands.cooldowns import BucketType
+import nextcord
+from nextcord.ext import commands, tasks
+from nextcord.ext.commands import CheckFailure, CommandOnCooldown
+from nextcord.ext.commands.cooldowns import BucketType
 from emoji import demojize
 
 from helper.git_backup import gitpush
@@ -65,16 +65,16 @@ class Statistics(commands.Cog):
             return
         else:
             if isinstance(error, CommandOnCooldown):
-                embed = discord.Embed(description=str(error), color=discord.Color.red())
+                embed = nextcord.Embed(description=str(error), color=nextcord.Color.red())
                 await ctx.reply(embed=embed, delete_after=3)
                 await ctx.message.delete(delay=3)
             if isinstance(error, CheckFailure):
-                embed = discord.Embed(description="This command is disabled for you, your role, this channel or this guild.", color=discord.Color.red())
+                embed = nextcord.Embed(description="This command is disabled for you, your role, this channel or this guild.", color=nextcord.Color.red())
                 await ctx.reply(embed=embed, delete_after=5)
                 await ctx.message.delete(delay=5)
             try:
                 await ctx.message.add_reaction("<:ERROR:792154973559455774>")
-            except discord.errors.NotFound:
+            except nextcord.errors.NotFound:
                 pass
         raise error
 
@@ -85,7 +85,7 @@ class Statistics(commands.Cog):
         else:
             try:
                 await ctx.message.add_reaction("<:checkmark:776717335242211329>")
-            except discord.errors.NotFound:
+            except nextcord.errors.NotFound:
                 pass
 
     @commands.Cog.listener()
@@ -94,7 +94,7 @@ class Statistics(commands.Cog):
 
     @commands.Cog.listener()
     async def on_typing(self, channel, user, when: datetime):
-        if user.bot or channel.type != discord.ChannelType.text:
+        if user.bot or channel.type != nextcord.ChannelType.text:
             return
         t = int(when.timestamp())
         SQLFunctions.add_activity(user, channel, t, SQLFunctions.ActivityType.typing, self.conn)
@@ -114,7 +114,7 @@ class Statistics(commands.Cog):
                 else:
                     deleted_messages = deleted_messages[0]
                 SQLFunctions.insert_or_update_config("deleted_messages", deleted_messages+1, self.conn)
-            except discord.NotFound:  # message was already deleted
+            except nextcord.NotFound:  # message was already deleted
                 pass
         SUBJECT_ID = self.get_current_subject()
         # Makes it better to work with the message
@@ -211,11 +211,11 @@ class Statistics(commands.Cog):
         SQLFunctions.update_statistics(member, SUBJECT_ID, reactions_removed=1)
         SQLFunctions.update_statistics(reaction.message.author, SUBJECT_ID, reactions_taken_away=1)
 
-    async def create_embed(self, member: discord.Member, statistic_columns) -> discord.Embed:
+    async def create_embed(self, member: nextcord.Member, statistic_columns) -> nextcord.Embed:
         """
         Creates an embed for a user's single statistics
         """
-        embed = discord.Embed(title=f"Statistics for {str(member)}")
+        embed = nextcord.Embed(title=f"Statistics for {str(member)}")
         for key in statistic_columns.keys():
             column = statistic_columns[key]
             size = len(column)
@@ -247,7 +247,7 @@ class Statistics(commands.Cog):
             assert single_statistic_name is not None
             statistic_columns[single_statistic_name] = single_statistic
 
-        embed = discord.Embed(title=name)
+        embed = nextcord.Embed(title=name)
         for key in statistic_columns.keys():
             column = statistic_columns[key]
             lb_msg = ""
@@ -296,11 +296,11 @@ class Statistics(commands.Cog):
                 await ctx.send(embed=embed)
             else:
                 try:
-                    memberconverter = discord.ext.commands.MemberConverter()
+                    memberconverter = nextcord.ext.commands.MemberConverter()
                     member = await memberconverter.convert(ctx, user)
-                except discord.ext.commands.errors.BadArgument:
+                except nextcord.ext.commands.errors.BadArgument:
                     await ctx.send("Invalid user. Mention the user for this to work.")
-                    raise discord.ext.commands.errors.BadArgument
+                    raise nextcord.ext.commands.errors.BadArgument
                 embed = await self.create_embed(member, statistic_columns)
                 await ctx.send(embed=embed)
 

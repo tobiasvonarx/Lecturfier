@@ -1,5 +1,5 @@
-import discord
-from discord.ext import commands
+import nextcord
+from nextcord.ext import commands
 
 attributes = {
     "aliases": ["h", "halp", "hell", "hepl", "helps", "guide", "manual"],
@@ -10,7 +10,7 @@ attributes = {
 class Help(commands.HelpCommand):
     # help
     async def send_bot_help(self, mapping):
-        embed = discord.Embed(color=0xcbd3d7)
+        embed = nextcord.Embed(color=0xcbd3d7)
         bot_prefix = self.clean_prefix
         # sorts by the amount of commands in the cog (after filtering)
         for cog, cmds in sorted(mapping.items(), key=lambda e: len(e[1]), reverse=True):
@@ -32,7 +32,7 @@ class Help(commands.HelpCommand):
 
         embed.set_footer(text=f"Use {bot_prefix}help <command / category> to get more information.")
         embed.set_author(name=self.context.message.author.name, icon_url=self.context.message.author.avatar_url)
-        file = discord.File("./images/help_page.gif")
+        file = nextcord.File("./images/help_page.gif")
         channel = self.get_destination()
         await channel.send(embed=embed, file=file)
 
@@ -55,7 +55,7 @@ class Help(commands.HelpCommand):
     # help <cog>
     async def send_cog_help(self, cog):
         cog_name = getattr(cog, "qualified_name", "Other")
-        embed = discord.Embed(title=cog_name, color=0xcbd3d7)
+        embed = nextcord.Embed(title=cog_name, color=0xcbd3d7)
         embed.description = cog.description
         if len(cog.description) == 0:
             embed.description = "*[no info]*"
@@ -69,7 +69,7 @@ class Help(commands.HelpCommand):
         # command path
         if len(command.full_parent_name) > 0:
             command_name = command.full_parent_name.replace(" ", " > ") + " > " + command_name
-        embed = discord.Embed(title=command_name, color=0xcbd3d7)
+        embed = nextcord.Embed(title=command_name, color=0xcbd3d7)
 
         help_msg = command.help
         if help_msg is None:

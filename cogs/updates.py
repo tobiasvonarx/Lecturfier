@@ -3,8 +3,8 @@ import time
 import traceback
 from datetime import datetime, timedelta
 
-import discord
-from discord.ext import commands, tasks
+import nextcord
+from nextcord.ext import commands, tasks
 from pytz import timezone
 
 from helper.lecture_scraper.scrape import scraper
@@ -12,8 +12,8 @@ from helper.log import log
 from helper.sql import SQLFunctions
 
 
-async def create_lecture_embed(subject_name, stream_url, zoom_url, subject_website_url, subject_room=None, color=discord.colour.Color.light_gray()):
-    embed = discord.Embed(title=f"Lecture Starting: {subject_name}", color=color, timestamp=datetime.now(timezone("Europe/Zurich")))
+async def create_lecture_embed(subject_name, stream_url, zoom_url, subject_website_url, subject_room=None, color=nextcord.colour.Color.light_gray()):
+    embed = nextcord.Embed(title=f"Lecture Starting: {subject_name}", color=color, timestamp=datetime.now(timezone("Europe/Zurich")))
     if stream_url is not None:
         stream_url = f"[Click Here]({stream_url})"
     if subject_website_url is not None:
@@ -49,7 +49,6 @@ class Updates(commands.Cog):
         self.bot = bot
         self.send_message_to_finn = False
         self.lecture_updater_version = "v1.0"
-        self.db_path = "./data/discord.db"
         self.conn = SQLFunctions.connect()
         self.channel_to_post = SQLFunctions.get_config("channel_to_post_updates", self.conn)
         self.background_loop.start()
@@ -165,9 +164,9 @@ class Updates(commands.Cog):
                 channel = self.bot.get_channel(910450760234467328)
                 msg = f"Good Morning! It's time for **Advent of Code** day #{day}!\n[*Click here to get to the challenge*](https://adventofcode.com/2021/day/{day})"
                 msg += "\n||*Consider donating to AoC to have it continue next year again* <:Santawww:910435057607524352>||"
-                embed = discord.Embed(
+                embed = nextcord.Embed(
                     description=msg,
-                    color=discord.Color.red())
+                    color=nextcord.Color.red())
                 await channel.send("<@&910433615689699388>", embed=embed)
                 self.sent_advent = True
 
@@ -189,14 +188,14 @@ class Updates(commands.Cog):
         # Input/Error catching
         if day is None or hour is None:
             await ctx.reply("ERROR! Not enough parameters. You need `<semester> <day> <hour> [role ID to ping]`.")
-            raise discord.ext.commands.CommandError
+            raise nextcord.ext.commands.CommandError
         try:
             semester = int(semester)
             day = int(day)
             hour = int(hour)
         except ValueError:
             await ctx.reply("ERROR! Semester, day and hour need to be integers.")
-            raise discord.ext.commands.BadArgument
+            raise nextcord.ext.commands.BadArgument
 
         subject: SQLFunctions.Subject = SQLFunctions.get_starting_subject(semester, self.conn, day, hour)
         if subject is None:
@@ -228,14 +227,14 @@ class Updates(commands.Cog):
             return m.author == ctx.message.author and m.channel == ctx.channel
 
         try:
-            msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+            msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
             if msg.content.lower() == "stop":
                 await ctx.reply("Adding subject canceled.")
                 return
             subject_name = msg.content
 
             await msg.reply("What is the subject abbreviation?")
-            msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+            msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
             if msg.content.lower() == "stop":
                 await ctx.reply("Adding subject canceled.")
                 return
@@ -243,7 +242,7 @@ class Updates(commands.Cog):
 
             for i in range(5):
                 await msg.reply("What semester is the subject in?")
-                msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+                msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
                 if msg.content.lower() == "stop":
                     await ctx.reply("Adding subject canceled.")
                     return
@@ -257,7 +256,7 @@ class Updates(commands.Cog):
                 return
 
             await msg.reply("What is the subject website link? `-` or `0` to skip.")
-            msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+            msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
             if msg.content.lower() == "stop":
                 await ctx.reply("Adding subject canceled.")
                 return
@@ -268,7 +267,7 @@ class Updates(commands.Cog):
             for i in range(5):
                 await msg.reply("What days is the lecture on? Separated by **space** and using integers. Any numbers under 0 or above 6 are ignored."
                                 "\n```\nMonday: 0\nTuesday: 1\nWednesday: 2\nThursday: 3\nFriday: 4```")
-                msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+                msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
                 if msg.content.lower() == "stop":
                     await ctx.reply("Adding subject canceled.")
                     return
@@ -288,7 +287,7 @@ class Updates(commands.Cog):
                     try:
                         # Starting time of lecture
                         await msg.reply(f"At what hour does the lecture start on {weekday_names[day]}?")
-                        msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+                        msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
                         if msg.content.lower() == "stop":
                             await ctx.reply("Adding subject canceled.")
                             return
@@ -296,7 +295,7 @@ class Updates(commands.Cog):
 
                         # Ending time of lecture
                         await msg.reply(f"At what hour does the lecture end on {weekday_names[day]}?")
-                        msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+                        msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
                         if msg.content.lower() == "stop":
                             await ctx.reply("Adding subject canceled.")
                             return
@@ -307,7 +306,7 @@ class Updates(commands.Cog):
 
                     # Zoom link
                     await msg.reply("What is the subject zoom link? `-` or `0` to skip.")
-                    msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+                    msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
                     if msg.content.lower() == "stop":
                         await ctx.reply("Adding subject canceled.")
                         return
@@ -317,7 +316,7 @@ class Updates(commands.Cog):
 
                     # Stream Link
                     await msg.reply("What is the subject stream link? `-` or `0` to skip.")
-                    msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+                    msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
                     if msg.content.lower() == "stop":
                         await ctx.reply("Adding subject canceled.")
                         return
@@ -327,7 +326,7 @@ class Updates(commands.Cog):
 
                     # On Site location
                     await msg.reply("What is the on site location of the subject? `-` or `0` to skip.")
-                    msg: discord.Message = await self.bot.wait_for("message", check=check, timeout=30)
+                    msg: nextcord.Message = await self.bot.wait_for("message", check=check, timeout=30)
                     if msg.content.lower() == "stop":
                         await ctx.reply("Adding subject canceled.")
                         return
@@ -365,7 +364,7 @@ class Updates(commands.Cog):
 
         except asyncio.TimeoutError:
             await ctx.reply("You took too long to respond. You have 30 seconds to respond.")
-            raise discord.ext.commands.BadArgument
+            raise nextcord.ext.commands.BadArgument
 
     async def send_lecture_start(self, subject_name, website_url, stream_url, channel_id, role_id, zoom_url=None, subject_room=None):
         channel = self.bot.get_channel(channel_id)
@@ -377,7 +376,7 @@ class Updates(commands.Cog):
             ping_msg = ""
         await channel.send(ping_msg, embed=embed)
 
-    async def check_updates(self, channel: discord.TextChannel, version):
+    async def check_updates(self, channel: nextcord.TextChannel, version):
         start = time.time()
         scraped_info = scraper()
         changes = scraped_info[0]
@@ -388,15 +387,15 @@ class Updates(commands.Cog):
             try:
                 for i in range(len(changes[lesson])):
                     # EMBED COLOR
-                    color = discord.Color.lighter_grey()
+                    color = nextcord.Color.lighter_grey()
                     if lesson == "Introduction to Programming":
-                        color = discord.Color.blue()
+                        color = nextcord.Color.blue()
                     elif lesson == "Discrete Mathematics":
-                        color = discord.Color.purple()
+                        color = nextcord.Color.purple()
                     elif lesson == "Linear Algebra":
-                        color = discord.Color.gold()
+                        color = nextcord.Color.gold()
                     elif lesson == "Algorithms and Data Structures":
-                        color = discord.Color.magenta()
+                        color = nextcord.Color.magenta()
 
                     try:
                         correct_changes = changes[lesson][i]
@@ -405,7 +404,7 @@ class Updates(commands.Cog):
                         user = self.bot.get_user(self.bot.owner_id)
                         await user.send(f"Lesson: {lesson}\nError: KeyError\nChanges: `{changes}`")
                     if correct_changes["event"] == "other":
-                        embed = discord.Embed(title=f"{lesson} has been changed!",
+                        embed = nextcord.Embed(title=f"{lesson} has been changed!",
                                               description=f"[Click here to get to {lesson}'s website]({lecture_urls[lesson]}).",
                                               timestamp=datetime.utcfromtimestamp(time.time()), color=color)
                         if self.send_message_to_finn:
@@ -424,7 +423,7 @@ class Updates(commands.Cog):
 
 **NEW**:
 {self.format_exercise((correct_changes["content"]["new"]), correct_changes["content"]["keys"])}"""
-                        embed = discord.Embed(title=title, description=description,
+                        embed = nextcord.Embed(title=title, description=description,
                                               timestamp=datetime.utcfromtimestamp(time.time()), color=color)
                         embed.set_footer(
                             text=f"{version} | This message took {round(time.time() - start, 2)} seconds to send")
@@ -433,7 +432,7 @@ class Updates(commands.Cog):
                         await msg.edit(content=ping_msg)
                         try:
                             await msg.publish()
-                        except discord.Forbidden:
+                        except nextcord.Forbidden:
                             pass
                         send_ping = False
 
@@ -441,7 +440,7 @@ class Updates(commands.Cog):
                         log(f"{lesson} got a new update", "LESSON")
                         title = f"Something new was added on __{lesson}__"
                         description = f"""**NEW**:\n{self.format_exercise(correct_changes["content"])}"""
-                        embed = discord.Embed(title=title, description=description,
+                        embed = nextcord.Embed(title=title, description=description,
                                               timestamp=datetime.utcfromtimestamp(time.time()), color=color)
                         embed.set_footer(
                             text=f"{version} | This message took {round(time.time() - start, 2)} seconds to send")
@@ -452,7 +451,7 @@ class Updates(commands.Cog):
                             await msg.edit(content=ping_msg)
                         try:
                             await msg.publish()
-                        except discord.Forbidden:
+                        except nextcord.Forbidden:
                             pass
                         send_ping = False
 

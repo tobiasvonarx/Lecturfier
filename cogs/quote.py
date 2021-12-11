@@ -1,19 +1,16 @@
 import asyncio
-import math
 import random
 import time
 from datetime import datetime
 from enum import Enum
 
-import discord
-from discord.ext import commands, menus
-from discord.ext.commands.cooldowns import BucketType
-from discord_components import (Button, ButtonStyle, DiscordComponents,
-                                Interaction, InteractionType)
+import nextcord
+from nextcord import Button, ButtonStyle, Interaction, InteractionType, ActionRow
+from nextcord.ext import commands
+from nextcord.ext.commands.cooldowns import BucketType
 from pytz import timezone
 
 from helper.sql import SQLFunctions
-
 
 def isascii(s):
     """Checks how many bytes of non-ascii characters there is in the quote"""
@@ -25,8 +22,8 @@ def isascii(s):
     return total < 300
 
 
-async def send_quote(channel: discord.channel, quote: SQLFunctions.Quote):
-    embed = discord.Embed(description=quote.QuoteText, color=0x404648)
+async def send_quote(channel: nextcord.channel, quote: SQLFunctions.Quote):
+    embed = nextcord.Embed(description=quote.QuoteText, color=0x404648)
     local_tz = timezone("Europe/Zurich")
     dt = quote.CreatedAt.astimezone(local_tz).strftime("%d.%b %Y").lstrip("0")
     embed.set_footer(text=f"-{quote.Name}, {dt} | Quote ID: {quote.QuoteID} | Elo: {round(quote.Elo)}")
@@ -103,7 +100,7 @@ def set_new_elo(score1, score2, quote1: SQLFunctions.Quote, quote2: SQLFunctions
 
 
 class Battle:
-    def __init__(self, embed: discord.Embed, components: list[list[Button]], quote1: SQLFunctions.Quote, quote2: SQLFunctions.Quote, rank1: int,
+    def __init__(self, embed: nextcord.Embed, components: list[list[Button]], quote1: SQLFunctions.Quote, quote2: SQLFunctions.Quote, rank1: int,
                  rank2: int, pause: bool):
         self.embed = embed
         self.components = components
@@ -112,16 +109,16 @@ class Battle:
         self.rank1 = rank1
         self.rank2 = rank2
         self.pause = pause  # True if the battle didnt start immediately
-        self.message: discord.Message = None
+        self.message: nextcord.Message = None
 
-    def add_message(self, message: discord.Message):
+    def add_message(self, message: nextcord.Message):
         self.message = message
 
     def __repr__(self):
         return f"{self.quote1.QuoteID} : {self.quote2.QuoteID}"
 
 
-def recover_quote_battle(message: discord.Message, conn) -> Battle:
+def recover_quote_battle(message: nextcord.Message, conn) -> Battle:
     embed = message.embeds[0]
     name1 = embed.fields[0].name
     quote1_id = int(name1.split(" | ")[1].replace("ID: ", ""))
@@ -146,7 +143,6 @@ class Quote(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.time = 0
-        self.db_path = "./data/discord.db"
         self.conn = SQLFunctions.connect()
         self.battle_scores = {}  # message id and score of the battle as a tuple
         self.voted_users = {}  # dict with lists of users that voted on a battle
@@ -172,7 +168,7 @@ class Quote(commands.Cog):
         if str(emoji) == "<:addQuote:840982832654712863>":
             # We first check if the channel is an announcement channel
             # To avoid unecessary queries
-            if channel.type == discord.ChannelType.news:
+            if channel.type == nextcord.ChannelType.news:
                 print("Channel is an announcement channel. Ignoring Quote.")
                 return
 
@@ -184,8 +180,8 @@ class Quote(commands.Cog):
             await self.add_quote(username=user, message=message, quote=message.content, quoteAdder=quoteAdder, reactionQuote=True)
 
     @commands.Cog.listener()
-    async def on_button_click(self, res: Interaction):
-        if res.component.id in ["1", "2", "3"]:
+    async def on_interaction(self, res: Interaction):
+        if res.id in ["1", "2", "3"]:
             found_battle = None
             # True if the message hasnt been edited in a while
             battle_deactivated = res.message.edited_at is None or datetime.timestamp(res.message.edited_at) + 15 < datetime.timestamp(
@@ -204,45 +200,43 @@ class Quote(commands.Cog):
                 print("Reactivated battle: ", found_battle)
 
             # the battle is ongoing, so add the vote where it belongs
-            for i in range(5):  # incase of an error, we try at max 5 times again
-                try:
-                    if res.component.id == "3":
-                        await res.respond(type=InteractionType.ChannelMessageWithSource,
-                                          content="You selected the bin button. The bin simply starts the battle countdown if it hasn't "
-                                                  "yet so you don't have to vote if both quotes are crap.")
-                    elif res.user.id in self.voted_users[res.message.id]:
-                        await res.respond(type=InteractionType.ChannelMessageWithSource,
-                                          content="You already voted on this battle. You can't vote twice.\n"
-                                                  "*If this battle is bugged, try the button in ~10 seconds again. That should reactivate it again.*")
-                    else:
-                        self.battle_scores[res.message.id][int(res.component.id) - 1] += 1  # increments the score
-                        self.voted_users[res.message.id].append(res.user.id)
-                        member = res.message.guild.get_member(res.user.id)
-                        if member is None:
-                            member = await res.message.guild.fetch_member(res.user.id)
-                        SQLFunctions.update_statistics(member, 0, self.conn, vote_count=1)
-                        await res.respond(type=InteractionType.ChannelMessageWithSource, content=f"Successfully voted for option {res.component.id}")
-                    if found_battle:  # if this was a recovered battle, start it
-                        await self.handle_battle(res.message.channel, found_battle, 20)
-                    break
-                except discord.errors.DiscordServerError:
-                    battle = found_battle
-                    if res.message.id in self.active_battles:
-                        battle = self.active_battles[res.message.id]
-                    print(f"Got a DiscordServerError caught during a quote battle on battle. COUNT: {i}\n"
-                          f"\t--- {battle}")
-                    await asyncio.sleep(random.randrange(i * 10, i * 20))
-                except discord.errors.HTTPException:
-                    battle = found_battle
-                    if res.message.id in self.active_battles:
-                        battle = self.active_battles[res.message.id]
-                    print(f"Got a HTTPException which was caught during a quote battle on battle. COUNT: {i}\n"
-                          f"\t--- {battle}")
-                    await asyncio.sleep(random.randrange(5, 8))
-                except KeyError:
-                    if not res.responded:
-                        await res.respond(type=InteractionType.ChannelMessageWithSource,
-                                          content="The battle you voted on seems to have already ended.")
+            try:
+                if res.id == "3":
+                    await res.respond(type=InteractionType.ChannelMessageWithSource,
+                                      content="You selected the bin button. The bin simply starts the battle countdown if it hasn't "
+                                              "yet so you don't have to vote if both quotes are crap.")
+                elif res.user.id in self.voted_users[res.message.id]:
+                    await res.respond(type=InteractionType.ChannelMessageWithSource,
+                                      content="You already voted on this battle. You can't vote twice.\n"
+                                              "*If this battle is bugged, try the button in ~10 seconds again. That should reactivate it again.*")
+                else:
+                    self.battle_scores[interaction.message.id][1] += 1  # increments the score
+                    self.voted_users[interaction.message.id].append(interaction.user.id)
+                    member = interaction.message.guild.get_member(interaction.user.id)
+                    if member is None:
+                        member = await interaction.message.guild.fetch_member(interaction.user.id)
+                    SQLFunctions.update_statistics(member, 0, self.conn, vote_count=1)
+                    await interaction.response.send_message("Successfully voted for option 1", ephemeral=True)
+                if found_battle:  # if this was a recovered battle, start it
+                    await self.handle_battle(res.message.channel, found_battle, 20)
+            except nextcord.errors.DiscordServerError:
+                battle = found_battle
+                if res.message.id in self.active_battles:
+                    battle = self.active_battles[res.message.id]
+                print(f"Got a DiscordServerError caught during a quote battle on battle. COUNT: {i}\n"
+                      f"\t--- {battle}")
+                await asyncio.sleep(random.randrange(i * 10, i * 20))
+            except nextcord.errors.HTTPException:
+                battle = found_battle
+                if res.message.id in self.active_battles:
+                    battle = self.active_battles[res.message.id]
+                print(f"Got a HTTPException which was caught during a quote battle on battle. COUNT: {i}\n"
+                      f"\t--- {battle}")
+                await asyncio.sleep(random.randrange(5, 8))
+            except KeyError:
+                if not res.responded:
+                    await res.respond(type=InteractionType.ChannelMessageWithSource,
+                                      content="The battle you voted on seems to have already ended.")
 
     @commands.cooldown(4, 10, BucketType.user)
     @commands.guild_only()
@@ -276,9 +270,9 @@ class Quote(commands.Cog):
             # If $quote is written on its own, send a random quote from any user
             quote = SQLFunctions.get_quote(-1, guild_id=ctx.message.guild.id, conn=self.conn, random=True)
             if quote is None:
-                embed = discord.Embed(title="Quote Error", description="There are no quotes on this server yet.", color=0xFF0000)
+                embed = nextcord.Embed(title="Quote Error", description="There are no quotes on this server yet.", color=0xFF0000)
                 await ctx.send(embed=embed)
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
             await send_quote(ctx, quote)
 
         else:  # there's a user given
@@ -316,9 +310,9 @@ class Quote(commands.Cog):
                         q = quotes[0]
                 if q is None:
                     # userID has no quote on this server
-                    embed = discord.Embed(title="Quotes", description=f"No quote found from user or with ID `{name}`")
+                    embed = nextcord.Embed(title="Quotes", description=f"No quote found from user or with ID `{name}`")
                     await ctx.send(embed=embed)
-                    raise discord.ext.commands.errors.BadArgument
+                    raise nextcord.ext.commands.errors.BadArgument
 
                 await send_quote(ctx, q)
                 return
@@ -335,20 +329,20 @@ class Quote(commands.Cog):
                     else:
                         quotes = SQLFunctions.get_quotes(name=name, guild_id=ctx.message.guild.id, conn=self.conn)
                     if len(quotes) == 0:
-                        embed = discord.Embed(
+                        embed = nextcord.Embed(
                             title="Quotes Error",
                             description=f"There does not exist any quote for the user `{name}`",
                             color=0xFF0000)
                         await ctx.send(embed=embed)
-                        raise discord.ext.commands.errors.BadArgument
+                        raise nextcord.ext.commands.errors.BadArgument
                     if index < 0 or index >= len(quotes):
-                        embed = discord.Embed(
+                        embed = nextcord.Embed(
                             title="Quotes Error",
                             description=f"There does not exist a quote with that index for the user \"{name}\". "
                                         f"Keep the index between `0 <= index < {len(quotes)}`.",
                             color=0xFF0000)
                         await ctx.send(embed=embed)
-                        raise discord.ext.commands.errors.BadArgument
+                        raise nextcord.ext.commands.errors.BadArgument
                     q = quotes[index]
                     await send_quote(ctx.channel, q)
 
@@ -359,7 +353,7 @@ class Quote(commands.Cog):
 
                     await self.add_quote(username=name, quote=quote, message=ctx.message)
 
-    async def get_quote_members(self, channel: discord.TextChannel, username: str) -> (SQLFunctions.DiscordMember, list[int]):
+    async def get_quote_members(self, channel: nextcord.TextChannel, username: str) -> (SQLFunctions.DiscordMember, list[int]):
         uniqueIDs = []  # list of all matching uniqueIDs
 
         user_id = username.replace("<@", "").replace(">", "").replace("!", "")
@@ -380,8 +374,8 @@ class Quote(commands.Cog):
 
         return None, uniqueIDs
 
-    async def add_quote(self, username, message: discord.Message, quote, quoteAdder: discord.Member = None, reactionQuote=False,
-                        discord_member: discord.Member = None):
+    async def add_quote(self, username, message: nextcord.Message, quote, quoteAdder: nextcord.Member = None, reactionQuote=False,
+                        discord_member: nextcord.Member = None):
         username = username.replace("<@", "").replace(">", "").replace("!", "")
         channel = message.channel
         member = None
@@ -394,39 +388,39 @@ class Quote(commands.Cog):
         # Some error messages ------------------------------
         # If the quote is too long
         if len(quote) > 500 and not await self.bot.is_owner(quoteAdder):
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Quote Error",
                 description="This quote exceeds the max_length length of 500 chars. Ping Mark if you want the quote added.",
                 color=0xFF0000)
             if reactionQuote:
                 try:
                     await message.add_reaction("<:tooLongQuote:852876951407820820>")
-                except discord.errors.Forbidden:
+                except nextcord.errors.Forbidden:
                     pass
             else:
                 await channel.send(content=quoteAdder.mention, embed=embed, delete_after=5)
-            raise discord.ext.commands.errors.NotOwner
+            raise nextcord.ext.commands.errors.NotOwner
 
         # If the quote has too many non-ascii characters
         if not isascii(quote) and not await self.bot.is_owner(quoteAdder):
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Quote Error",
                 description="This quote contains too many non-ascii characters. Ping Mark if you want the quote added.",
                 color=0xFF0000)
             if reactionQuote:
                 try:
                     await message.add_reaction("<:tooLongQuote:852876951407820820>")
-                except discord.errors.Forbidden:
+                except nextcord.errors.Forbidden:
                     pass
             else:
                 await channel.send(content=quoteAdder.mention, embed=embed, delete_after=5)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         blocked_ids = SQLFunctions.get_config("BlockQuote", self.conn)
 
         # If the user is blocked from adding quotes
         if quoteAdder.id in blocked_ids:
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Quote Error",
                 description="You are blocked from adding new quotes. Possible reasons include adding too many fake quotes or "
                             "simply spamming the quote command.",
@@ -434,12 +428,12 @@ class Quote(commands.Cog):
             if reactionQuote:
                 try:
                     await message.add_reaction("<:blockedFromQuoting:840988109578698782>")
-                except discord.errors.Forbidden:
+                except nextcord.errors.Forbidden:
                     pass
             else:
                 await channel.send(content=quoteAdder.mention, embed=embed, delete_after=5)
                 await message.delete(delay=2)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         uniqueID = None
         if discord_member is not None:  # that username is a discord user ID
@@ -453,7 +447,7 @@ class Quote(commands.Cog):
 
         # checks if its a self quote
         if addedBy.UniqueMemberID == uniqueID:
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Quote Error",
                 description="You can't quote yourself. That's pretty lame.",
                 color=0xFF0000)
@@ -461,11 +455,11 @@ class Quote(commands.Cog):
             if reactionQuote:
                 try:
                     await message.add_reaction("<:selfQuote:852877064515092520>")
-                except discord.errors.Forbidden:
+                except nextcord.errors.Forbidden:
                     pass
             else:
                 await channel.send(content=quoteAdder.mention, embed=embed, delete_after=5)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         aliases = SQLFunctions.get_quote_aliases(self.conn)
         for a in aliases.keys():
@@ -479,13 +473,13 @@ class Quote(commands.Cog):
         else:
             res = SQLFunctions.get_quotes(quote=quote, guild_id=channel.guild.id, unique_member_id=uniqueID)
         if len(res) > 0:
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Quote Error",
                 description="This quote has been added already.",
                 color=0xFF0000)
             if not reactionQuote:
                 await channel.send(content=quoteAdder.mention, embed=embed, delete_after=5)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         quote_object: SQLFunctions.Quote = SQLFunctions.add_quote(quote, quoted_name, member, addedBy, channel.guild.id)
         quoteID = "n/a"
@@ -495,10 +489,10 @@ class Quote(commands.Cog):
         if reactionQuote:
             try:
                 await message.add_reaction("<:addedQuote:840985556304265237>")
-            except discord.errors.NotFound:
+            except nextcord.errors.NotFound:
                 pass
 
-        embed = discord.Embed(title="Added Quote", description=f"Added quote for {quoted_name}\nQuoteID: `{quoteID}`", color=0x00FF00)
+        embed = nextcord.Embed(title="Added Quote", description=f"Added quote for {quoted_name}\nQuoteID: `{quoteID}`", color=0x00FF00)
 
         if reactionQuote:
             await message.reply(embed=embed, mention_author=False)
@@ -519,7 +513,7 @@ class Quote(commands.Cog):
         if user is None:
             total_quotes, total_names, total_voted_on = SQLFunctions.get_quote_stats(ctx.message.guild.id, self.conn)
 
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="All Quotes Stats",
                 description="You didn't specify what user to get quotes off. So here are some stats."
             )
@@ -556,15 +550,15 @@ class Quote(commands.Cog):
 
         # If there are no quotes for the given person;
         if len(all_quotes) == 0:
-            embed = discord.Embed(title="Quotes Error", description=f"{user} doesn't have any quotes yet.", color=0xFF0000)
+            embed = nextcord.Embed(title="Quotes Error", description=f"{user} doesn't have any quotes yet.", color=0xFF0000)
             await ctx.send(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         pages = create_pages(all_quotes)
 
         p = Pages(self.bot, ctx, pages, ctx.message.author.id, f"All quotes from {all_quotes[0].Name}", 180)
         if len(pages) > 1:
-            await p.handle_pages()
+            await ctx.send(view=p)
         else:
             await ctx.message.delete(delay=120)
             await ctx.send(embed=p.create_embed(), delete_after=120)
@@ -580,40 +574,40 @@ class Quote(commands.Cog):
         print(f"{reason=}")
         # input parsing
         if quoteID is None:
-            embed = discord.Embed(title="Quotes Error", description=f"No quote ID given.", color=0xFF0000)
+            embed = nextcord.Embed(title="Quotes Error", description=f"No quote ID given.", color=0xFF0000)
             await ctx.send(embed=embed, delete_after=5)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         if not quoteID.isnumeric():
-            embed = discord.Embed(title="Quotes Error", description=f"Quote ID has to be an integer.", color=0xFF0000)
+            embed = nextcord.Embed(title="Quotes Error", description=f"Quote ID has to be an integer.", color=0xFF0000)
             await ctx.send(embed=embed, delete_after=5)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         quoteID = int(quoteID)
 
         # check if quote ID is a valid ID
         quote = SQLFunctions.get_quote(quote_ID=quoteID, guild_id=ctx.message.guild.id, conn=self.conn)
         if quote is None:
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Quotes Error",
                 description=f"The given quote ID can't be assigned to a valid quote. Did you type the right ID?",
                 color=0xFF0000)
             await ctx.send(embed=embed, delete_after=5)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # check if quote ID is already listed in db
         quotes_to_remove = SQLFunctions.get_quotes_to_remove(self.conn)
         for q in quotes_to_remove:
             if quote.QuoteID == q.Quote.QuoteID:
-                embed = discord.Embed(
+                embed = nextcord.Embed(
                     title="Quotes Error",
                     description=f"The given quote ID is already listed in the quotes to remove list.",
                     color=0xFF0000)
                 await ctx.send(embed=embed, delete_after=5)
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
 
         # At this point we have a valid Quote ID, so add it to the database
         member = SQLFunctions.get_or_create_discord_member(ctx.message.author, conn=self.conn)
         SQLFunctions.insert_quote_to_remove(quoteID, reason, member, self.conn)
-        embed = discord.Embed(
+        embed = nextcord.Embed(
             title="Added Quote Report",
             description=f"Succesfully requested quote {quoteID} to be deleted.",
             color=0x00FF00)
@@ -684,18 +678,18 @@ class Quote(commands.Cog):
         if len(args) > 200:
             args = args[:200] + "[...]"
         if len(pages) == 0:
-            embed = discord.Embed(title="No Matching Quotes Found",
+            embed = nextcord.Embed(title="No Matching Quotes Found",
                                   description=f"Tag:\n```{args.replace('```', '')}```",
-                                  color=discord.Color.red())
+                                  color=nextcord.Color.red())
             await ctx.reply(embed=embed)
-            raise discord.ext.commands.BadArgument
+            raise nextcord.ext.commands.BadArgument
         qm = Pages(
             self.bot,
             ctx,
             pages,
             ctx.message.author.id,
             f"Quotes containing string: {args}")
-        await qm.handle_pages()
+        await ctx.send(view=qm)
 
     @commands.is_owner()
     @quote.command(name="delete", aliases=["del"], usage="delete <Quote ID>")
@@ -706,7 +700,7 @@ class Quote(commands.Cog):
         """
         if quoteID is None:
             await ctx.send("No quote ID given.")
-            raise discord.ext.commands.BadArgument
+            raise nextcord.ext.commands.BadArgument
         try:
             quote_id = int(quoteID)
             try:
@@ -729,9 +723,9 @@ class Quote(commands.Cog):
 
         # If there are no quotes on the server
         if len(quoted_names) == 0:
-            embed = discord.Embed(title="Quote Error", description="There are no quotes on this server yet.", color=0xFF0000)
+            embed = nextcord.Embed(title="Quote Error", description="There are no quotes on this server yet.", color=0xFF0000)
             await ctx.send(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # create mention message to cache the mentions for the watching discord users
         mention_message = ""
@@ -770,7 +764,7 @@ class Quote(commands.Cog):
 
         p = Pages(self.bot, ctx, pages, ctx.message.author.id, "All Quote Names")
         if len(pages) > 1:
-            await p.handle_pages()
+            await ctx.send(view=p)
         else:
             await ctx.send(embed=p.create_embed(), delete_after=60)
             await ctx.message.delete(delay=60)
@@ -828,7 +822,7 @@ class Quote(commands.Cog):
             count = 3
         elif not count.isnumeric():
             await ctx.reply("The given count needs to be numeric.")
-            raise discord.ext.commands.BadArgument
+            raise nextcord.ext.commands.BadArgument
         count = int(count)
         for _ in range(count):
             battle = self.init_battle_message(ctx.channel)
@@ -854,14 +848,14 @@ class Quote(commands.Cog):
         PAUSE = time_for_battle == 0  # true if this battle doesnt start immediatly
 
         if not PAUSE:
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 description=f"Choose the better quote using the buttons. Battle ends after {time_for_battle} seconds.\nVotes: 0",
-                color=discord.Color.gold()
+                color=nextcord.Color.gold()
             )
         else:
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 description=f"Choose the better quote using the buttons. Battle countdown starts once somebody votes.\nVotes: 0",
-                color=discord.Color.random()
+                color=nextcord.Color.random()
             )
 
         if random.random() <= 0.1:  # there's a 5% chance for a top battle to show up
@@ -912,7 +906,7 @@ class Quote(commands.Cog):
         self.voted_users[msg.id] = []
         self.battle_scores[msg.id] = [0, 0]
 
-    async def handle_battle(self, channel: discord.TextChannel, battle: Battle, time_for_battle=30, user_message=None):
+    async def handle_battle(self, channel: nextcord.TextChannel, battle: Battle, time_for_battle=30, user_message=None):
         """
         Handles the whole quote battle including picking the quotes, sending the message,
         editing it and deleting the messages afterwards.
@@ -937,10 +931,10 @@ class Quote(commands.Cog):
             await msg.edit(embed=embed)
             await asyncio.sleep(5)
 
-        embed = discord.Embed(
+        embed = nextcord.Embed(
             title=embed.title + " Over",
             description=f"Quote Battle over. There were {len(self.voted_users[msg.id])} intense battles.",
-            color=discord.Color.gold()
+            color=nextcord.Color.gold()
         )
 
         score1, score2 = self.battle_scores[msg.id]
@@ -979,12 +973,12 @@ class Quote(commands.Cog):
 
         try:
             await msg.delete(delay=60)
-        except (discord.NotFound, discord.Forbidden):
+        except (nextcord.NotFound, nextcord.Forbidden):
             pass
         if user_message is not None:
             try:
                 await user_message.delete(delay=60)
-            except (discord.NotFound, discord.Forbidden):
+            except (nextcord.NotFound, nextcord.Forbidden):
                 pass
 
         # automatically sends the battle again once it ends if its in the battle channel
@@ -994,7 +988,7 @@ class Quote(commands.Cog):
                 try:
                     msg = await channel.send(embed=battle.embed, components=battle.components)
                     break
-                except discord.errors.DiscordServerError:
+                except nextcord.errors.DiscordServerError:
                     await asyncio.sleep(5)
             battle.add_message(msg)
 
@@ -1007,7 +1001,7 @@ class Quote(commands.Cog):
         Each vote from a user counts as a win for that quote and immediately takes effect.
         """
         battle = self.init_battle_message(ctx.channel, 30)
-        msg: discord.Message = await ctx.send(embed=battle.embed, components=battle.components)
+        msg: nextcord.Message = await ctx.send(embed=battle.embed, components=battle.components)
         self.init_battle_dict(msg, battle)
         await self.handle_battle(ctx.channel, battle, 30, ctx.message)
 
@@ -1021,14 +1015,14 @@ class Quote(commands.Cog):
             user_id: str = user.replace("<@", "").replace(">", "").replace("!", "")
             if not user_id.isnumeric():
                 await ctx.reply(f"Did not find a user with the given ID/mention.")
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
             quotes = SQLFunctions.get_quotes(guild_id=ctx.message.guild.id, rank_by_elo=True, discord_user_id=int(user_id))
             if len(quotes) == 0:
                 await ctx.reply(f"Did not find any quotes from the given user.")
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
             title = f"Quote Leaderboard from {quotes[0].Name}"
         qm = Pages(self.bot, ctx, create_pages(quotes), ctx.message.author.id, title)
-        await qm.handle_pages()
+        await ctx.send(view=qm)
 
     @commands.guild_only()
     @quote.group(aliases=["f", "favorite", "favourite", "favourites"], usage="favorites", invoke_without_command=True)
@@ -1041,17 +1035,17 @@ class Quote(commands.Cog):
         quotes = SQLFunctions.get_favorite_quotes_of_user(ctx.author, self.conn)
         # If there are no quotes for the given person;
         if len(quotes) == 0:
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Quotes Error",
                 description=f"You don't have any favorite quotes yet.\nCheck out the subcommand `add` to add your first favorite command!",
-                color=discord.Color.red())
-            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+                color=nextcord.Color.red())
+            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
             await ctx.send(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         pages = create_pages(quotes)
         qm = Pages(self.bot, ctx, pages, ctx.author.id, "Favorite Quotes")
-        await qm.handle_pages()
+        await ctx.send(view=qm)
 
     @commands.guild_only()
     @favorites.command(name="add", aliases=["a"], usage="add <quote ID>")
@@ -1062,38 +1056,38 @@ class Quote(commands.Cog):
         """
         # Input parsing
         if quote_id is None:
-            embed = discord.Embed(description=f"No Quote ID given as parameter.", color=discord.Color.red())
-            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+            embed = nextcord.Embed(description=f"No Quote ID given as parameter.", color=nextcord.Color.red())
+            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
             await ctx.reply(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         if not quote_id.isnumeric():
-            embed = discord.Embed(description=f"The given Quote ID is not an int!", color=discord.Color.red())
-            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+            embed = nextcord.Embed(description=f"The given Quote ID is not an int!", color=nextcord.Color.red())
+            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
             await ctx.reply(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         quote_id = int(quote_id)
 
         # if the quote ID even exists
         quote = SQLFunctions.get_quote(quote_id, ctx.message.guild.id, self.conn)
         if quote is None:
-            embed = discord.Embed(description=f"Quote ID `{quote_id}` does not exist!", color=discord.Color.red())
-            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+            embed = nextcord.Embed(description=f"Quote ID `{quote_id}` does not exist!", color=nextcord.Color.red())
+            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
             await ctx.reply(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # if the quote ID was already favoritted by this user
         quotes = SQLFunctions.get_favorite_quotes_of_user(ctx.author, self.conn)
         for q in quotes:
             if q.QuoteID == quote_id:
-                embed = discord.Embed(description=f"You already favorited the quote with ID `{quote_id}`!", color=discord.Color.red())
-                embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+                embed = nextcord.Embed(description=f"You already favorited the quote with ID `{quote_id}`!", color=nextcord.Color.red())
+                embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
                 await ctx.reply(embed=embed)
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
 
         # add favorite
         SQLFunctions.add_favorite_quote(ctx.author, quote_id, self.conn)
-        embed = discord.Embed(description=f"Successfully favorited quote ID `{quote_id}` by {quote.Name}!", color=discord.Color.green())
-        embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+        embed = nextcord.Embed(description=f"Successfully favorited quote ID `{quote_id}` by {quote.Name}!", color=nextcord.Color.green())
+        embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
         await ctx.reply(embed=embed)
 
     @commands.guild_only()
@@ -1105,24 +1099,24 @@ class Quote(commands.Cog):
         """
         # Input parsing
         if quote_id is None:
-            embed = discord.Embed(description=f"No Quote ID given as parameter.", color=discord.Color.red())
-            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+            embed = nextcord.Embed(description=f"No Quote ID given as parameter.", color=nextcord.Color.red())
+            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
             await ctx.reply(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         if not quote_id.isnumeric():
-            embed = discord.Embed(description=f"The given Quote ID is not an int!", color=discord.Color.red())
-            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+            embed = nextcord.Embed(description=f"The given Quote ID is not an int!", color=nextcord.Color.red())
+            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
             await ctx.reply(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         quote_id = int(quote_id)
 
         # if the quote ID even exists
         quote = SQLFunctions.get_quote(quote_id, ctx.message.guild.id, self.conn)
         if quote is None:
-            embed = discord.Embed(description=f"Quote ID `{quote_id}` does not exist!", color=discord.Color.red())
-            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+            embed = nextcord.Embed(description=f"Quote ID `{quote_id}` does not exist!", color=nextcord.Color.red())
+            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
             await ctx.reply(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # checks if the quote was ever favorited
         quotes = SQLFunctions.get_favorite_quotes_of_user(ctx.author, self.conn)
@@ -1131,15 +1125,15 @@ class Quote(commands.Cog):
                 break
         else:
             # Quote wasn't favorited
-            embed = discord.Embed(description=f"Quote with ID `{quote_id}` was never favorited!", color=discord.Color.red())
-            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+            embed = nextcord.Embed(description=f"Quote with ID `{quote_id}` was never favorited!", color=nextcord.Color.red())
+            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
             await ctx.reply(embed=embed)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
         # remove favorite
         SQLFunctions.remove_favorite_quote(ctx.author, quote_id, self.conn)
-        embed = discord.Embed(description=f"Successfully unfavorited quote ID `{quote_id}`!", color=discord.Color.blurple())
-        embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+        embed = nextcord.Embed(description=f"Successfully unfavorited quote ID `{quote_id}`!", color=nextcord.Color.blurple())
+        embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
         await ctx.reply(embed=embed)
 
 
@@ -1161,7 +1155,7 @@ class QuotesToRemove(menus.Menu):
         return await ctx.send(embed=embed)
 
     def create_embed(self, page_number):
-        embed = discord.Embed(title="Quotes to Remove", description=f"Page {page_number + 1}/{len(self.pages)}", color=0x00003f)
+        embed = nextcord.Embed(title="Quotes to Remove", description=f"Page {page_number + 1}/{len(self.pages)}", color=0x00003f)
         userID, quoteID, quote, reporterID, name, reason = self.pages[page_number]
         if len(reason) > 700:
             reason = reason[:700] + "..."
@@ -1203,12 +1197,12 @@ class QuotesToRemove(menus.Menu):
         userID, quoteID, quote, reporterID, name, reason = self.pages[self.page_count]
         SQLFunctions.delete_quote(quoteID, self.conn)
         self.pages.pop(self.page_count)
-        embed = discord.Embed(title="Deleted Quote", description=f"Quote with ID {quoteID} was YEEEEEETED.", color=0xffff00)
+        embed = nextcord.Embed(title="Deleted Quote", description=f"Quote with ID {quoteID} was YEEEEEETED.", color=0xffff00)
         embed.add_field(name="Quote", value=quote)
         await self.ctx.send(content=f"Reported by <@{reporterID}>", embed=embed)
 
         if len(self.pages) == 0:
-            embed = discord.Embed(title="Cleansing is done", description=f"All reported quotes were yeeted.", color=0xffff00)
+            embed = nextcord.Embed(title="Cleansing is done", description=f"All reported quotes were yeeted.", color=0xffff00)
             await self.ctx.send(embed=embed)
             self.stop()
             return
@@ -1222,11 +1216,11 @@ class QuotesToRemove(menus.Menu):
         userID, quoteID, quote, reporterID, name, reason = self.pages[self.page_count]
         SQLFunctions.delete_quote_to_remove(quoteID, self.conn)
         self.pages.pop(self.page_count)
-        embed = discord.Embed(title="Ignored Quote", description=f"Quote with ID {quoteID} was ignored.", color=0xffff00)
+        embed = nextcord.Embed(title="Ignored Quote", description=f"Quote with ID {quoteID} was ignored.", color=0xffff00)
         await self.ctx.send(content=f"Reported by <@{reporterID}>", embed=embed)
 
         if len(self.pages) == 0:
-            embed = discord.Embed(title="Cleansing is done", description=f"All reported quotes were yeeted.", color=0xffff00)
+            embed = nextcord.Embed(title="Cleansing is done", description=f"All reported quotes were yeeted.", color=0xffff00)
             await self.ctx.send(embed=embed)
             self.stop()
             return
@@ -1268,8 +1262,9 @@ def create_pages(quotes: list[SQLFunctions.Quote]) -> list[str]:
     return pages
 
 
-class Pages:
-    def __init__(self, bot: discord.Client, ctx: discord.ext.commands.Context, pages: list, user_id: int, embed_title: str, seconds=60, description=""):
+class Pages(nextcord.ui.View):
+    def __init__(self, bot: nextcord.Client, ctx: nextcord.ext.commands.Context, pages: list, user_id: int, embed_title: str, seconds=60, description=""):
+        super().__init__()
         self.bot = bot  # bot object required so we can wait for the button click
         self.ctx = ctx  # so that we can remove the original message in the end
         self.page_count = 0  # current page
@@ -1281,122 +1276,87 @@ class Pages:
         self.message = None  # the quotes message sent by the bot
         self.description = description  # description of the embed
 
-    async def handle_pages(self):
-        """
-        The meat of the pages which handles what shall be done depending
-        on what button was pressed. This sits in a while loop until the time
-        of self.seconds passes.
-        """
-        self.message = await self.send_initial_message()
-        while True:
-            # waits for a button click event
-            try:
-                # We add a timeout so that the message still gets deleted
-                # even if nobody presses any button
-                res = await self.bot.wait_for("button_click", timeout=self.seconds)
-            except asyncio.TimeoutError:
-                break
-            if res.message is not None and res.message.id == self.message.id:
-                try:
-                    if res.user.id == self.user_id:
-                        if res.component.label == "<":  # prev page
-                            await self.page_down()
-                        elif res.component.label == ">":  # next page
-                            await self.page_up()
-                        elif res.component.label == "X":  # break resulting in deleting the page and user message
-                            break
-                        elif res.component.label == "<<":  # first page
-                            await self.first_page()
-                        elif res.component.label == ">>":  # last page
-                            await self.last_page()
-                        # Responds by updating the message
-                        await res.respond(type=InteractionType.UpdateMessage, components=self.get_components(), embed=self.create_embed())
-                    else:
-                        await res.respond(type=InteractionType.ChannelMessageWithSource, content="This page wasn't called by you.")
-                except AttributeError:
-                    await res.respond(type=InteractionType.ChannelMessageWithSource,
-                                      content="Sorry got a little error. Simply press the button again.")
-        try:
-            await self.ctx.message.delete()
-        except discord.errors.NotFound:
-            pass
-        await self.message.delete()
-
-    async def send_initial_message(self) -> discord.Message:
-        """
-        Sends the initial message on page 1 (index 0) with
-        the buttons
-        """
-        embed = self.create_embed()
-        return await self.ctx.send(
-            embed=embed,
-            components=self.get_components()
-        )
-
-    def get_components(self) -> list:
+    def disable_buttons(self):
         """
         Returns the buttons correctly colored. Depending if
         it's the first or last page, some buttons will be disabled.
         """
-        components = [
-            Button(style=ButtonStyle.blue, label="<<"),
-            Button(style=ButtonStyle.blue, label="<"),
-            Button(style=ButtonStyle.red, label="X"),
-            Button(style=ButtonStyle.blue, label=">"),
-            Button(style=ButtonStyle.blue, label=">>")
-        ]
-        if self.page_count == len(self.pages) - 1:  # we are on the last page
-            components[3] = Button(style=ButtonStyle.grey, label=">", disabled=True)
-            components[4] = Button(style=ButtonStyle.grey, label=">>", disabled=True)
+        for button in self.children:
+            button.disabled = False
+            button.style = ButtonStyle.blurple
+            if self.page_count == len(self.pages) - 1 and button.label in [">", ">>"] or self.page_count == 0 and button.label in ["<", "<<"]:
+                button.disabled = True
+                button.style = ButtonStyle.grey
 
-        if self.page_count == 0:  # we are on the first page
-            components[0] = Button(style=ButtonStyle.grey, label="<<", disabled=True)
-            components[1] = Button(style=ButtonStyle.grey, label="<", disabled=True)
-
-        return [components]
-
-    def create_embed(self) -> discord.Embed:
+    def create_embed(self) -> nextcord.Embed:
         """
         Creates a discord embed with the given self.embed_title as
         the title and the page depending on the current page we're on.
         """
-        embed = discord.Embed(title=self.embed_title, color=0x404648)
-        if (len(self.description) > 0):
+        embed = nextcord.Embed(title=self.embed_title, color=0x404648)
+        if len(self.description) > 0:
             embed.description = self.description
         embed.add_field(name=f"Page {self.page_count + 1} / {len(self.pages)}", value=self.pages[self.page_count])
-        embed.set_author(name=str(self.ctx.message.author), icon_url=self.ctx.message.author.avatar_url)
+        embed.set_author(name=str(self.ctx.message.author), icon_url=self.ctx.message.author.display_avatar.url)
         if len(self.pages) > 1:
             embed.set_footer(text="<< first page | < prev page | ❌ delete message | > next page | >> last page")
         return embed
 
-    async def page_down(self) -> None:
+    @nextcord.ui.button(label="<", style=ButtonStyle.blurple)
+    async def page_down(self, button: nextcord.ui.Button, interaction: nextcord.Interaction) -> None:
         """
         Goes down a page
         """
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
+            return
         self.page_count = (self.page_count - 1) % len(self.pages)
+        self.disable_buttons()
         embed = self.create_embed()
         await self.message.edit(embed=embed)
 
-    async def page_up(self) -> None:
+    @nextcord.ui.button(label=">", style=ButtonStyle.blurple)
+    async def page_up(self, button: nextcord.ui.Button, interaction: nextcord.Interaction) -> None:
         """
         Goes up a page
         """
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
+            return
         self.page_count = (self.page_count + 1) % len(self.pages)
+        self.disable_buttons()
         embed = self.create_embed()
-        await self.message.edit(embed=embed)
+        await interaction.response.edit_message(embed=embed, view=self)
 
-    async def last_page(self) -> None:
+    @nextcord.ui.button(label=">>", style=ButtonStyle.blurple)
+    async def last_page(self, button: nextcord.ui.Button, interaction: nextcord.Interaction) -> None:
         """
         Heads to the last page
         """
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
+            return
         self.page_count = len(self.pages) - 1
+        self.disable_buttons()
         embed = self.create_embed()
-        await self.message.edit(embed=embed)
+        await interaction.response.edit_message(embed=embed, view=self)
 
-    async def first_page(self) -> None:
+    @nextcord.ui.button(label="<<", style=ButtonStyle.blurple)
+    async def first_page(self, button: nextcord.ui.Button, interaction: nextcord.Interaction) -> None:
         """
         Heads to the first page
         """
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
+            return
         self.page_count = 0
+        self.disable_buttons()
         embed = self.create_embed()
         await self.message.edit(embed=embed)
+
+    @nextcord.ui.button(label="X", style=ButtonStyle.red)
+    async def closeMenu(self, button, interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
+            return
+        self.stop()

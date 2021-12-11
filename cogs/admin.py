@@ -2,10 +2,10 @@ import asyncio
 import json
 from datetime import datetime
 
-import discord
+import nextcord
 import discord_components
-from discord.ext import commands
-from discord.ext.commands.cooldowns import BucketType
+from nextcord.ext import commands
+from nextcord.ext.commands.cooldowns import BucketType
 from discord_components import (Button, ButtonStyle, DiscordComponents,
                                 InteractionType)
 from pytz import timezone
@@ -21,7 +21,6 @@ class Admin(commands.Cog):
         self.bot_prefix_path = "./data/bot_prefix.json"
         with open(self.bot_prefix_path, "r") as f:
             self.all_prefix = json.load(f)
-        self.db_path = "./data/discord.db"
         self.conn = SQLFunctions.connect()
         self.welcome_message_id = SQLFunctions.get_config("WelcomeMessage", self.conn)
         self.requested_help = []  # list of DiscordUserIDs of who requested help
@@ -59,7 +58,7 @@ class Admin(commands.Cog):
         channel_id = 774322847812157450
         channel = message.guild.get_channel(channel_id)
         attachments = len(message.attachments)
-        embed = discord.Embed(
+        embed = nextcord.Embed(
             description=f"**User ID:** {message.author.id}\n"
                         f"**Channel: <#{message.channel.id}>\n"
                         f"Attachments:** `{attachments}`\n"
@@ -83,12 +82,12 @@ class Admin(commands.Cog):
 
         # find out who deleted it
         await asyncio.sleep(3)  # small delay as audit log sometimes takes a bit
-        audit: discord.AuditLogEntry = None
+        audit: nextcord.AuditLogEntry = None
         try:
-            async for entry in message.guild.audit_logs(action=discord.AuditLogAction.message_delete, limit=10):
+            async for entry in message.guild.audit_logs(action=nextcord.AuditLogAction.message_delete, limit=10):
                 if entry.target.id == message.author.id and entry.created_at >= message.created_at:
                     audit = entry
-        except discord.errors.Forbidden:
+        except nextcord.errors.Forbidden:
             pass
         if audit is None:
             embed.add_field(name="Deleted by", value="A bot or the user")
@@ -140,10 +139,10 @@ class Admin(commands.Cog):
             ]]
             await res.respond(ephemeral=True, content=msg, components=buttons)
         elif comp_id == "give_external":
-            role = discord.Object(767315361443741717)
+            role = nextcord.Object(767315361443741717)
             await member.add_roles(role, reason="Not verified role")
             # for testing purposes
-            embed = discord.Embed(description=f"Added **External** role to {member.mention}\n"
+            embed = nextcord.Embed(description=f"Added **External** role to {member.mention}\n"
                                               f"ID: `{member.id}`", color=0xa52222)
             embed.set_author(name=str(member), icon_url=member.avatar_url)
             await admin_log_channel.send(embed=embed)
@@ -158,20 +157,20 @@ class Admin(commands.Cog):
                 if staff_channel is None:
                     print("TA role was accepted. Don't have access to staff channels.")
                     staff_channel = self.bot.get_channel(237673537429700609)
-                ta_embed = discord.Embed(
+                ta_embed = nextcord.Embed(
                     title=f"TA|{member.id}",
                     description=f"{member.mention} requests the TA role",
-                    color=discord.Color.gold())
+                    color=nextcord.Color.gold())
                 role_ping = f"||<@&844572520497020988>|| {member.mention}"
                 components = [[
                     Button(label="Accept", id="accept_ta_request", style=ButtonStyle.green, emoji=yes_emoji),
                     Button(label="Decline", id="decline_ta_request", style=ButtonStyle.red, emoji=no_emoji)
                 ]]
                 await staff_channel.send(role_ping, embed=ta_embed, components=components)
-                embed = discord.Embed(
+                embed = nextcord.Embed(
                     title="Successfully requested the TA role",
                     description="Expect a direct message from a staff member to verify your TA status.",
-                    color=discord.Color.blue()
+                    color=nextcord.Color.blue()
                 )
                 await res.respond(embed=embed)
                 self.requested_ta.append(member.id)
@@ -180,32 +179,32 @@ class Admin(commands.Cog):
             ta_user = res.message.guild.get_member(ta_user_id)
             if ta_user is None:
                 await res.channel.send("lol, the user left before receiving the TA role")
-                embed = discord.Embed(description=f"User left before receiving TA role", color=discord.Color.red())
+                embed = nextcord.Embed(description=f"User left before receiving TA role", color=nextcord.Color.red())
                 await res.respond(type=InteractionType.UpdateMessage, embed=embed, components=[])
             else:
-                embed = discord.Embed(description=f"Added **TA** role to {ta_user.mention}\n"
-                                                  f"Accepted by: {member.mention}", color=discord.Color.green())
-                role = discord.Object(767084137361440819)
+                embed = nextcord.Embed(description=f"Added **TA** role to {ta_user.mention}\n"
+                                                  f"Accepted by: {member.mention}", color=nextcord.Color.green())
+                role = nextcord.Object(767084137361440819)
                 await ta_user.add_roles(role, reason="Accepted TA role")
                 await res.channel.send(embed=embed)
-                embed = discord.Embed(title=f"TA|{ta_user.id}",
+                embed = nextcord.Embed(title=f"TA|{ta_user.id}",
                                       description=f"{ta_user.mention} requested the TA role\n**ACCEPTED**",
-                                      color=discord.Color.green())
+                                      color=nextcord.Color.green())
                 await res.respond(type=InteractionType.UpdateMessage, embed=embed, components=[])
         elif comp_id == "decline_ta_request":
             ta_user_id = int(res.message.embeds[0].title.split("|")[1])
             ta_user = res.message.guild.get_member(ta_user_id)
             if ta_user is None:
                 await res.channel.send("lol, the user left anyway...")
-                embed = discord.Embed(description=f"User left already and didn't get TA role anyway", color=discord.Color.red())
+                embed = nextcord.Embed(description=f"User left already and didn't get TA role anyway", color=nextcord.Color.red())
                 await res.respond(type=InteractionType.UpdateMessage, embed=embed, components=[])
             else:
-                embed = discord.Embed(description=f"Did **not** add TA role to {ta_user.mention}\n"
-                                                  f"Declined by: {member.mention}", color=discord.Color.red())
+                embed = nextcord.Embed(description=f"Did **not** add TA role to {ta_user.mention}\n"
+                                                  f"Declined by: {member.mention}", color=nextcord.Color.red())
                 await res.channel.send(embed=embed)
-                embed = discord.Embed(title=f"TA|{ta_user.id}",
+                embed = nextcord.Embed(title=f"TA|{ta_user.id}",
                                       description=f"{ta_user.mention} requested the TA role\n**DECLINED**",
-                                      color=discord.Color.red())
+                                      color=nextcord.Color.red())
                 await res.respond(type=InteractionType.UpdateMessage, embed=embed, components=[])
         # ^^^^^^^^^^^^^^^  TA REQUEST FOR NEWCOMERS ^^^^^^^^^^^^^^^
 
@@ -216,7 +215,7 @@ class Admin(commands.Cog):
                 Button(label="What is Discord?", style=ButtonStyle.URL, url="https://discord.com/safety/360044149331-What-is-Discord"),
                 Button(label="Other", id="help_other")
             ]]
-            embed = discord.Embed(title="Help Page", description="What do you need help with?", color=discord.Color.green())
+            embed = nextcord.Embed(title="Help Page", description="What do you need help with?", color=nextcord.Color.green())
             await res.respond(components=help_buttons, embed=embed)
         elif comp_id == "help_verify":
             content = """**How to verify that you're an ETH student:**
@@ -227,7 +226,7 @@ class Admin(commands.Cog):
 **-3b.** Send `\\confirm INSERT_TOKEN_HERE` in this channel.
 **-3c.** Private message <@306523617188118528> and type `\\confirm INSERT_TOKEN_HERE`
 **4.** If you sent the correct token, you should be verified now. The gif underneath shows how it should look."""
-            embed = discord.Embed(title="Help with verifying", description=content, color=discord.Color.green())
+            embed = nextcord.Embed(title="Help with verifying", description=content, color=nextcord.Color.green())
             embed.set_image(url="https://cdn.discordapp.com/attachments/747768907992924192/856128802610741258/verify.gif")
             await res.respond(embed=embed,
                               components=[Button(label="Verify ETH Student", style=ButtonStyle.URL, url="https://dauth.spclr.ch/", emoji=yes_emoji)])
@@ -238,10 +237,10 @@ class Admin(commands.Cog):
             if member.id in self.requested_help:
                 await res.respond(content="You already requested help. Please wait.")
                 return
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="A newcomer needs help",
                 description=f"{member.mention} ({str(member)}) requested help in <#881611441105416263>.",
-                color=discord.Color.gold()
+                color=nextcord.Color.gold()
             )
             await staff_channel.send(f"||<@&844572520497020988>|| {member.mention}", embed=embed)
             await res.respond(content="The staff team was notified and will help you shortly. You additionally should now have access to the <#881611441105416263> channel.")
@@ -261,7 +260,7 @@ class Admin(commands.Cog):
         Sends the welcome message for the D-INFK ETH server with the required buttons
         to get set up.
         """
-        embed = discord.Embed(
+        embed = nextcord.Embed(
             title="Welcome to the D-INFK ETH Server!",
             description=f"**To get the full experience of the server press one of the following buttons:**\n"
                         f"*(If you have any issues, private message one of the admins or moderators and they can help)*\n\n"
@@ -312,7 +311,7 @@ class Admin(commands.Cog):
                     await channel.send("Invalid prefix")
         else:
             await channel.send("Unrecognized command.", delete_after=7)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
     @commands.cooldown(10, 10, BucketType.user)
     @commands.command(aliases=["prefixes"], usage="prefix [<add/delete> <prefix> <info>]")
@@ -340,7 +339,7 @@ class Admin(commands.Cog):
         await self.send_leave_message(ctx, ctx.author, ctx.message.guild)
 
     async def send_welcome_message(self, channel, user, guild):
-        embed = discord.Embed(description=f"{user.mention} joined the server. **Welcome!**", color=0xadd8e6)
+        embed = nextcord.Embed(description=f"{user.mention} joined the server. **Welcome!**", color=0xadd8e6)
         memb_amt = len(guild.members)
         embed.set_footer(text=f"There are now {memb_amt} members")
         embed.set_author(name=str(user), icon_url=user.avatar_url)
@@ -349,7 +348,7 @@ class Admin(commands.Cog):
         await message.add_reaction("<a:blobjoin:821030765143785572>")
 
     async def send_leave_message(self, channel, user, guild):
-        embed = discord.Embed(description=f"{user.mention} left the server.", color=0x84001B)
+        embed = nextcord.Embed(description=f"{user.mention} left the server.", color=0x84001B)
         memb_amt = len(guild.members)
         embed.set_footer(text=f"There are now {memb_amt} members")
         embed.set_author(name=str(user), icon_url=user.avatar_url)
@@ -362,17 +361,17 @@ class Admin(commands.Cog):
         """
         Plays a little joke and "bans" the given user
         """
-        embed = discord.Embed(
+        embed = nextcord.Embed(
             title="Banning...",
             description=f"`Who:` {person}\n`Executed by:` {ctx.message.author.mention}\n`Reason:` {str(reason)}",
-            color=discord.Color.red()
+            color=nextcord.Color.red()
         )
         embed.set_thumbnail(url="https://c.tenor.com/n9bi4Y3smL0AAAAC/ban-hammer.gif")
         msg = await ctx.send(embed=embed)
         await asyncio.sleep(10)
-        embed = discord.Embed(
+        embed = nextcord.Embed(
             description=f"Was just a prank brudi {person}",
-            color=discord.Color.green()
+            color=nextcord.Color.green()
         )
         await msg.reply(embed=embed)
 

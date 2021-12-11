@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Union
 from enum import Enum
 
-import discord
+import nextcord
 
 logger = logging.getLogger()
 logger.addHandler(logging.StreamHandler())
@@ -36,7 +36,7 @@ class DiscordUser:
         self.CreatedAt = get_datetime(CreatedAt)
 
 
-def get_or_create_discord_user(user: discord.User, conn=connect()) -> DiscordUser:
+def get_or_create_discord_user(user: nextcord.User, conn=connect()) -> DiscordUser:
     result = conn.execute("SELECT * FROM DiscordUsers WHERE DiscordUserID = ?", (user.id,)).fetchone()
     if result is None:
         # The user doesn't exist in the db
@@ -69,7 +69,7 @@ class DiscordGuild:
         self.GuildRoleCount = args[5]
 
 
-def get_or_create_discord_guild(guild: discord.Guild, conn=connect()) -> DiscordGuild:
+def get_or_create_discord_guild(guild: nextcord.Guild, conn=connect()) -> DiscordGuild:
     result = conn.execute("SELECT * FROM DiscordGuilds WHERE DiscordGuildID = ?", (guild.id,)).fetchone()
     if result is None:
         # The guild doesn't exist in the db
@@ -96,7 +96,7 @@ class DiscordMember:
         self.User = User
 
 
-def get_or_create_discord_member(member: discord.Member, semester=0, conn=connect(), recursion_count=0) -> DiscordMember:
+def get_or_create_discord_member(member: nextcord.Member, semester=0, conn=connect(), recursion_count=0) -> DiscordMember:
     sql = """   SELECT  DM.UniqueMemberID, DM.DiscordUserID, DM.DiscordGuildID, DM.JoinedAt, DM.Nickname, DM.Semester,
                         DU.DiscordUserID, DU.DisplayName, DU.Discriminator, DU.IsBot, DU.AvatarURL, DU.CreatedAt
                 FROM DiscordMembers DM
@@ -144,7 +144,7 @@ class UserStatistics:
         self.ReactionTakenAway = args[16]
 
 
-def get_or_create_user_statistics(member: discord.Member, subject_id, conn=connect()) -> UserStatistics:
+def get_or_create_user_statistics(member: nextcord.Member, subject_id, conn=connect()) -> UserStatistics:
     result = conn.execute("""SELECT * FROM UserStatistics US
                  INNER JOIN DiscordMembers DM on DM.UniqueMemberID = US.UniqueMemberID
                  WHERE DM.DiscordUserID = ? AND DM.DiscordGuildID = ?""", (member.id, member.guild.id)).fetchone()
@@ -158,7 +158,7 @@ def get_or_create_user_statistics(member: discord.Member, subject_id, conn=conne
     return UserStatistics(result)
 
 
-def update_statistics(member: discord.Member, subject_id: int, conn=connect(), messages_sent=0, messages_deleted=0, messages_edited=0,
+def update_statistics(member: nextcord.Member, subject_id: int, conn=connect(), messages_sent=0, messages_deleted=0, messages_edited=0,
                       characters_sent=0,
                       words_sent=0, spoilers_sent=0, emojis_sent=0, files_sent=0, file_size_sent=0, images_sent=0, reactions_added=0,
                       reactions_removed=0, reactions_received=0, reactions_taken_away=0, vote_count=0) -> bool:
@@ -699,7 +699,7 @@ def update_quote_battle(quote_id, battles_amount, battles_won, elo, conn=connect
         conn.commit()
 
 
-def get_favorite_quotes_of_user(member: discord.Member, conn=connect()) -> list[Quote]:
+def get_favorite_quotes_of_user(member: nextcord.Member, conn=connect()) -> list[Quote]:
     dm = get_or_create_discord_member(member, 0, conn)
     sql = """   SELECT Q.QuoteID, Q.Quote, Q.Name, Q.UniqueMemberID,
                        Q.CreatedAt, Q.AddedByUniqueMemberID, Q.DiscordGuildID,
@@ -711,7 +711,7 @@ def get_favorite_quotes_of_user(member: discord.Member, conn=connect()) -> list[
     return [Quote(*q) for q in rows]
 
 
-def add_favorite_quote(member: discord.Member, quote_id: int, conn=connect()):
+def add_favorite_quote(member: nextcord.Member, quote_id: int, conn=connect()):
     dm = get_or_create_discord_member(member, 0, conn)
     try:
         conn.execute("INSERT INTO FavoriteQuotes(QuoteID, UniqueMemberID) VALUES (?,?)", (quote_id, dm.UniqueMemberID))
@@ -719,7 +719,7 @@ def add_favorite_quote(member: discord.Member, quote_id: int, conn=connect()):
         conn.commit()
 
 
-def remove_favorite_quote(member: discord.Member, quote_id: int, conn=connect()):
+def remove_favorite_quote(member: nextcord.Member, quote_id: int, conn=connect()):
     dm = get_or_create_discord_member(member, 0, conn)
     try:
         conn.execute("DELETE FROM FavoriteQuotes WHERE QuoteID=? AND UniqueMemberID=?", (quote_id, dm.UniqueMemberID))
@@ -734,7 +734,7 @@ class Name:
         self.member = member
 
 
-def get_quoted_names(guild: discord.Guild, conn=connect()) -> list[Name]:
+def get_quoted_names(guild: nextcord.Guild, conn=connect()) -> list[Name]:
     sql = """   SELECT  COUNT(*), DM.UniqueMemberID, DM.DiscordUserID, DM.DiscordGuildID, DM.JoinedAt, DM.Nickname, DM.Semester,
                         Q.QuoteID, Q.Quote, Q.Name, Q.UniqueMemberID, Q.CreatedAt, Q.AddedByUniqueMemberID, Q.DiscordGuildID,
                         Q.AmountBattled, Q.AmountWon, Q.Elo
@@ -789,7 +789,7 @@ def insert_quote_to_remove(quote_id, reason: str, member: DiscordMember, conn=co
         conn.commit()
 
 
-def get_reputations(member: discord.Member, conn=connect()) -> list[(bool, str)]:
+def get_reputations(member: nextcord.Member, conn=connect()) -> list[(bool, str)]:
     sql = """   SELECT R.IsPositive, R.ReputationMessage
                 FROM Reputations R
                 INNER JOIN DiscordMembers DM on R.UniqueMemberID = DM.UniqueMemberID
@@ -825,7 +825,7 @@ class VoiceLevel:
         self.experience = experience
 
 
-def get_voice_level(member: discord.Member, conn=connect()) -> VoiceLevel:
+def get_voice_level(member: nextcord.Member, conn=connect()) -> VoiceLevel:
     sql = """   SELECT VL.ExperienceAmount, DM.UniqueMemberID, DM.DiscordUserID, DM.DiscordGuildID, DM.JoinedAt, DM.Nickname, DM.Semester
                 FROM VoiceLevels VL
                 INNER JOIN DiscordMembers DM on VL.UniqueMemberID = DM.UniqueMemberID
@@ -838,7 +838,7 @@ def get_voice_level(member: discord.Member, conn=connect()) -> VoiceLevel:
     return VoiceLevel(member, result[0])
 
 
-def insert_or_update_voice_level(member: discord.Member, experience_amount=0, conn=connect()):
+def insert_or_update_voice_level(member: nextcord.Member, experience_amount=0, conn=connect()):
     discord_member = get_or_create_discord_member(member, conn=conn)
     sql = """   UPDATE OR IGNORE VoiceLevels
                 SET ExperienceAmount = ExperienceAmount + ?
@@ -997,7 +997,7 @@ class ActivityType(Enum):
     message = 2
     
 
-def add_activity(member: discord.Member, channel: discord.channel, timestamp: int, type: ActivityType, conn=connect()):
+def add_activity(member: nextcord.Member, channel: nextcord.channel, timestamp: int, type: ActivityType, conn=connect()):
     try:
         sql = """INSERT INTO Activity(
                     DiscordUserID, DiscordChannelID, DiscordGuildID, Timestamp, ActivityType

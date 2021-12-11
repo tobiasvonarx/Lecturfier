@@ -4,11 +4,11 @@ import time
 from datetime import datetime
 
 import aiohttp
-import discord
+import nextcord
 from bs4 import BeautifulSoup as bs
 from colorthief import ColorThief
-from discord.ext import commands, tasks
-from discord.ext.commands.cooldowns import BucketType
+from nextcord.ext import commands, tasks
+from nextcord.ext.commands.cooldowns import BucketType
 from PIL import UnidentifiedImageError
 from pytz import timezone
 
@@ -65,7 +65,7 @@ class Games(commands.Cog):
                     self.sent_covid = True
                     general = self.bot.get_channel(747752542741725247)
                     msg = "Good Morning!\nGuess today's covid cases using `$g <guess>`!"
-                    embed = discord.Embed(description=msg, color=discord.Color.gold())
+                    embed = nextcord.Embed(description=msg, color=nextcord.Color.gold())
                     await general.send("<@&770968106679926868>", embed=embed)
                 if "10:00" not in cur_time:
                     self.sent_covid = False
@@ -124,7 +124,7 @@ class Games(commands.Cog):
 
     async def send_message(self, channel, confirmed_cases):
         points_list = await self.point_distribute(confirmed_cases)
-        embed = discord.Embed(title="Covid Guesses",
+        embed = nextcord.Embed(title="Covid Guesses",
                               description=f"Confirmed cases: `{confirmed_cases}`",
                               color=0xFF0000)
         c = 0
@@ -206,13 +206,13 @@ class Games(commands.Cog):
                     if i >= 11:
                         break
                 guild_name = ctx.message.guild.name
-                embed = discord.Embed(
+                embed = nextcord.Embed(
                     title=f"Top {title} Guessers: **{guild_name}** <:coronavirus:767839970303410247>",
                     description=cont, color=0x00FF00)
                 if average:
                     embed.set_footer(text="Ordered by decay (value to the right). Left is actual average.")
             except KeyError:
-                embed = discord.Embed(title=f"Error", description="There are no covid guessing points yet", color=0xFF0000)
+                embed = nextcord.Embed(title=f"Error", description="There are no covid guessing points yet", color=0xFF0000)
         await ctx.send(embed=embed)
 
     @commands.cooldown(1, 10, BucketType.user)
@@ -241,7 +241,7 @@ class Games(commands.Cog):
                 return
             async with ctx.typing():
                 guesser = guesser[0]
-                image_url = str(ctx.message.author.avatar_url_as(format="png"))
+                image_url = ctx.message.author.display_avatar.replace(static_format="png").url
                 try:
                     async with aiohttp.ClientSession() as cs:
                         async with cs.get(image_url) as r:
@@ -254,7 +254,7 @@ class Games(commands.Cog):
                 already_guessed = "<:xmark:776717315139698720>"
                 if guesser.NextGuess is not None:
                     already_guessed = "<:checkmark:776717335242211329>"
-                embed = discord.Embed(title="Covid Guesser Profile",
+                embed = nextcord.Embed(title="Covid Guesser Profile",
                                       description=f"**User:** <@{ctx.message.author.id}>\n"
                                                   f"**Total Points:** `{guesser.TotalPointsAmount}`\n"
                                                   f"**Total Guesses:** `{guesser.GuessCount}`\n"
@@ -293,7 +293,7 @@ class Games(commands.Cog):
                     await ctx.send(f"{ctx.message.author.mention}, received your guess.", delete_after=7)
             except ValueError:
                 await ctx.send(f"{ctx.message.author.mention}, no proper positive integer given.", delete_after=7)
-                raise discord.ext.commands.errors.BadArgument
+                raise nextcord.ext.commands.errors.BadArgument
 
 
 def setup(bot):

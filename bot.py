@@ -1,15 +1,14 @@
 import json
 
-import discord
-from discord.ext import commands
-from discord_components import DiscordComponents
+import nextcord
+from nextcord.ext import commands
 
 from helper.sql import SQLFunctions
 
 with open("./data/settings.json", "r") as f:
     prefix = json.load(f)
 
-intents = discord.Intents()
+intents = nextcord.Intents()
 bot = commands.Bot(
     command_prefix=prefix["prefix"],
     description='Lecture Notifier',
@@ -20,8 +19,7 @@ bot = commands.Bot(
 bot.load_extension("cogs.mainbot")
 # Loads the help page, as it has an on_ready event that needs to be called
 bot.load_extension("cogs.help")
-# enables discord components
-DiscordComponents(bot)
+
 # connects to the db
 conn = SQLFunctions.connect()
 
@@ -53,7 +51,7 @@ async def globally_handle_permissions(ctx):
 
 
 # Load the token
-with open("../LECTURFIER.json", "r") as f:
+with open("../LECTURFIERBETA.json", "r") as f:
     settings = json.load(f)
 
 if len(settings["token"]) == 0:

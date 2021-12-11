@@ -3,9 +3,9 @@ import random
 import string
 import time
 
-import discord
-from discord.ext import commands
-from discord.ext.commands.cooldowns import BucketType
+import nextcord
+from nextcord.ext import commands
+from nextcord.ext.commands.cooldowns import BucketType
 from discord_components import *
 
 from helper import hangman
@@ -104,7 +104,7 @@ class Hangman(commands.Cog):
                     await ctx.send(f"{ctx.message.author.mention}! You guessed the word!\n`{''.join(current_word)}`")
                     break
 
-                embed = discord.Embed(
+                embed = nextcord.Embed(
                     title="Hangman Game",
                     description=f"Current Word: `{''.join(current_word)}`\n"
                                 f"Wrong Letters: {', '.join(ignored)}\n"
@@ -113,7 +113,7 @@ class Hangman(commands.Cog):
                 )
                 if msg is not None:
                     await msg.delete()
-                embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+                embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
                 msg = await ctx.send(embed=embed, components=generate_select())
 
             # if no initial character was given
@@ -125,13 +125,13 @@ class Hangman(commands.Cog):
                 final_word = random.choice(previous)
             else:
                 final_word = "".join(current_word)
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Hangman Game",
                 description=f"Correct Word: `{final_word}`\n"
                             f"Wrong Letters: {', '.join(ignored)}\n"
                             f"Amount of guesses: {guesses}"
             )
-            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.avatar_url)
+            embed.set_author(name=str(ctx.message.author), icon_url=ctx.message.author.display_avatar.url)
             if msg is not None:
                 await msg.delete()
             await ctx.send(embed=embed, components=[])
@@ -192,10 +192,10 @@ class Hangman(commands.Cog):
             await ctx.send(message)
         elif self.sending:
             await ctx.send("❗❗ Already working on a hangman. Hold on ❗❗", delete_after=7)
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
         else:
             await ctx.send("No input given. Check `$help hangman` to see how this command is used.")
-            raise discord.ext.commands.errors.BadArgument
+            raise nextcord.ext.commands.errors.BadArgument
 
 
 def setup(bot):

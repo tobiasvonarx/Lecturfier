@@ -2,8 +2,8 @@ import datetime
 import json
 import time
 
-import discord
-from discord.ext import commands
+import nextcord
+from nextcord.ext import commands
 
 from helper.sql import SQLFunctions
 
@@ -67,19 +67,19 @@ class Reputation(commands.Cog):
         member = ctx.message.guild.get_member(int(u_id))
 
         if member.id == ctx.message.author.id:
-            embed = discord.Embed(title="Error",
+            embed = nextcord.Embed(title="Error",
                                   description="You can't rep yourself.",
-                                  color=discord.Color.red())
+                                  color=nextcord.Color.red())
             await ctx.send(embed=embed, delete_after=10)
-            raise discord.ext.commands.BadArgument
+            raise nextcord.ext.commands.BadArgument
 
         # checks if the message chars are valid
         if not await valid_chars_checker(ctx.message.content):
-            embed = discord.Embed(title="Error",
+            embed = nextcord.Embed(title="Error",
                                   description="You can only use printable ascii characters in reputation messages.",
-                                  color=discord.Color.red())
+                                  color=nextcord.Color.red())
             await ctx.send(embed=embed, delete_after=10)
-            raise discord.ext.commands.BadArgument
+            raise nextcord.ext.commands.BadArgument
 
         # Add reputation to user
         time_valid = await self.add_rep(ctx.message, member, ctx.message.author)
@@ -87,10 +87,10 @@ class Reputation(commands.Cog):
         # Send return message
         if time_valid:
             display_name = member.display_name.replace("*", "").replace("_", "").replace("~", "").replace("\\", "").replace("`", "").replace("||", "").replace("@", "")
-            embed = discord.Embed(
+            embed = nextcord.Embed(
                 title="Added rep",
                 description=f"Added rep to {display_name}",
-                color=discord.Color.green())
+                color=nextcord.Color.green())
             embed.add_field(name="Comment:", value=f"```{rep}```")
             embed.set_author(name=str(ctx.message.author))
             await ctx.send(embed=embed)
@@ -101,18 +101,18 @@ class Reputation(commands.Cog):
             if last_sent_time is not None:
                 seconds = datetime.datetime.fromisoformat(last_sent_time).timestamp() + self.time_to_wait
                 next_time = datetime.datetime.fromtimestamp(seconds).strftime("%A at %H:%M")
-                embed = discord.Embed(
+                embed = nextcord.Embed(
                     title="Error",
                     description=f"You've repped too recently. You can rep again on {next_time}.",
-                    color=discord.Color.red())
+                    color=nextcord.Color.red())
                 await ctx.send(embed=embed, delete_after=10)
             else:
-                embed = discord.Embed(title="Error",
+                embed = nextcord.Embed(title="Error",
                                       description="Had problems parsing something. Tbh this error shouldn't show up...",
-                                      color=discord.Color.red())
+                                      color=nextcord.Color.red())
                 await ctx.send(embed=embed, delete_after=10)
 
-    async def send_reputations(self, message: discord.Message, member: discord.Member):
+    async def send_reputations(self, message: nextcord.Message, member: nextcord.Member):
         reputation_msg = ""
         rows = SQLFunctions.get_reputations(member, self.conn)
 
@@ -129,7 +129,7 @@ class Reputation(commands.Cog):
 
         display_name = member.display_name.replace("*", "").replace("_", "").replace("~", "").replace("\\", "").replace("`", "").replace("||", "").replace("@", "")
         msg = f"```diff\nReputations: {display_name}\n__________________________\n{reputation_msg}```"
-        embed = discord.Embed(description=msg)
+        embed = nextcord.Embed(description=msg)
         embed.set_footer(icon_url=member.avatar_url, text=str(member))
         await message.channel.send(embed=embed)
 
