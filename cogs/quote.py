@@ -5,12 +5,13 @@ from datetime import datetime
 from enum import Enum
 
 import nextcord
-from nextcord import Button, ButtonStyle, Interaction, InteractionType, ActionRow
+from nextcord import ButtonStyle
 from nextcord.ext import commands
 from nextcord.ext.commands.cooldowns import BucketType
 from pytz import timezone
 
 from helper.sql import SQLFunctions
+
 
 def isascii(s):
     """Checks how many bytes of non-ascii characters there is in the quote"""
@@ -99,44 +100,219 @@ def set_new_elo(score1, score2, quote1: SQLFunctions.Quote, quote2: SQLFunctions
     return current_elo1, current_elo2
 
 
-class Battle:
-    def __init__(self, embed: nextcord.Embed, components: list[list[Button]], quote1: SQLFunctions.Quote, quote2: SQLFunctions.Quote, rank1: int,
-                 rank2: int, pause: bool):
-        self.embed = embed
-        self.components = components
-        self.quote1 = quote1
-        self.quote2 = quote2
-        self.rank1 = rank1
-        self.rank2 = rank2
-        self.pause = pause  # True if the battle didnt start immediately
-        self.message: nextcord.Message = None
+class BattleView(nextcord.ui.View):
+    def __init__(self, conn, guild=None):
+        super().__init__(timeout=None)
+        self.awake = False  # if the values have been updated yet
+        self.quote1 = None
+        self.quote2 = None
+        self.rank1 = 0
+        self.rank2 = 0
+        self.score1 = 0
+        self.score2 = 0
+        self.voted_users = []
+        self.message = None
+        self.conn = conn
+        self.time_for_battle = 30
+        self.embed = None
+        channel_id = SQLFunctions.get_config("QuoteBattleChannel")
+        if len(channel_id) > 0:
+            self.battle_channel_id = channel_id[0]
+        else:
+            self.battle_channel_id = -1
+        self.guild = guild
+        if self.guild is not None:  # if a guild is given, generate the battle message
+            self.init_battle_message()
 
-    def add_message(self, message: nextcord.Message):
+    async def _wakeUp(self, message):
+        """
+        Used to recover a battle embed message
+        """
+        if self.awake:
+            return
         self.message = message
+        self.guild = message.guild
+        self.awake = True
+        self.embed = message.embeds[0]
+        name1 = self.embed.fields[0].name
+        quote1_id = int(name1.split(" | ")[1].replace("ID: ", ""))
+        name2 = self.embed.fields[1].name
+        quote2_id = int(name2.split(" | ")[1].replace("ID: ", ""))
+        self.quote1 = SQLFunctions.get_quote(quote1_id, message.guild.id, self.conn)
+        self.quote2 = SQLFunctions.get_quote(quote2_id, message.guild.id, self.conn)
+        self.rank1, self.rank2 = self.getQuoteRank(self.quote1, self.quote2)
+        await self._update()
 
-    def __repr__(self):
-        return f"{self.quote1.QuoteID} : {self.quote2.QuoteID}"
+    def getQuoteRank(self, quote1, quote2):
+        new_rank1 = 0
+        new_rank2 = 0
+        quotes = SQLFunctions.get_quotes(conn=self.conn, guild_id=self.guild.id, rank_by_elo=True)
+        for i, q in enumerate(quotes):
+            if q.QuoteID == quote1.QuoteID:
+                new_rank1 = i + 1
+            elif q.QuoteID == quote2.QuoteID:
+                new_rank2 = i + 1
+            if new_rank1 != 0 and new_rank2 != 0:
+                break
+        return new_rank1, new_rank2
+
+    async def _update(self):
+        start_time = time.time()
+        while start_time + self.time_for_battle > time.time():
+            self.embed.description = f"Choose the better quote using the buttons. Battle ending in {int(start_time + self.time_for_battle - time.time())} seconds.\nVotes: {len(self.voted_users)}"
+            await self.message.edit(embed=self.embed)
+            await asyncio.sleep(5)
+
+        embed = nextcord.Embed(
+            title=self.embed.title + " Over",
+            description=f"Quote Battle over. There were {len(self.voted_users)} intense battles.",
+            color=nextcord.Color.gold()
+        )
+        quote1 = self.quote1
+        quote2 = self.quote2
+        # sets new elos
+        set_new_elo(self.score1, self.score2, quote1, quote2, self.conn)
+
+        # gets the new ranks
+        new_rank1, new_rank2 = self.getQuoteRank(quote1, quote2)
+
+        quote1_text = quote1.QuoteText
+        quote2_text = quote2.QuoteText
+        if len(quote1_text) > 1000:
+            quote1_text = quote1_text[:1000] + " **[...]**"
+        if len(quote2_text) > 1000:
+            quote2_text = quote2_text[:1000] + " **[...]**"
+
+        embed.add_field(name=f"1️⃣ | ID: {quote1.QuoteID} | Name: {quote1.Name} | Rank: {self.rank1} → {new_rank1} | Wins: {self.score1}",
+                        value=quote1_text, inline=False)
+        embed.add_field(name=f"2️⃣ | ID: {quote2.QuoteID} | Name: {quote2.Name} | Rank: {self.rank2} → {new_rank2} | Wins: {self.score2}",
+                        value=quote2_text, inline=False)
+        await self.message.edit(embed=embed, view=None)
+
+        try:
+            await self.message.delete(delay=60)
+        except (nextcord.NotFound, nextcord.Forbidden):
+            pass
+
+        # automatically sends the battle again once it ends if its in the battle channel
+        await asyncio.sleep(10)  # small delay before sending a new battle
+        if self.message.channel.id == self.battle_channel_id:
+            view = BattleView(self.conn, self.guild)
+            await self.message.channel.send(embed=view.embed, view=view)
+
+    def init_battle_message(self):
+        quotes = SQLFunctions.get_quotes(conn=self.conn, guild_id=self.guild.id, rank_by_elo=True)
+        random.seed()
+
+        embed = nextcord.Embed(
+            description=f"Choose the better quote using the buttons. Battle countdown starts once somebody votes.\nVotes: 0",
+            color=nextcord.Color.random()
+        )
+
+        if random.random() <= 0.1:  # there's a 5% chance for a top battle to show up
+            embed.title = "TOP QUOTE BATTLE"
+            (rank1, quote1), (rank2, quote2) = pick_top_quotes(quotes)
+            embed.set_thumbnail(url="https://media4.giphy.com/media/LO8oXHPum0xworIyk4/giphy.gif")
+        else:
+            embed.title = "Epic Quote Battle"
+            min_battles = 99999
+            max_battles = 0
+            for q in quotes:
+                min_battles = min(q.AmountBattled, min_battles)
+                max_battles = max(q.AmountBattled, max_battles)
+            # Tokens is what is used to give weights to quotes so quotes that have been shown less are more likely to be shown
+            tokens = max_battles - min_battles + 1
+            quote_weights = [tokens - x.AmountBattled for x in quotes]
+            (rank1, quote1), (rank2, quote2) = pick_random_quotes(quotes, quote_weights)
+
+        quote1_text = quote1.QuoteText
+        quote2_text = quote2.QuoteText
+        if len(quote1_text) > 1000:
+            quote1_text = quote1_text[:1000] + " **[...]**"
+        if len(quote2_text) > 1000:
+            quote2_text = quote2_text[:1000] + " **[...]**"
+
+        embed.add_field(name=f"1️⃣ | ID: {quote1.QuoteID} | Name: {quote1.Name}", value=quote1_text, inline=False)
+        embed.add_field(name=f"2️⃣ | ID: {quote2.QuoteID} | Name: {quote2.Name}", value=quote2_text, inline=False)
+        embed.set_footer(text="The bin button simply starts the battle if it hasn't started yet.")
+        self.embed = embed
+
+    async def _handleVote(self, interaction: nextcord.Interaction):
+        self.voted_users.append(interaction.user)
+        member = interaction.guild.get_member(interaction.user.id)
+        if member is None:
+            member = await interaction.guild.fetch_member(interaction.user.id)
+        SQLFunctions.update_statistics(member, 0, self.conn, vote_count=1)
+
+    @nextcord.ui.button(style=ButtonStyle.blurple, emoji="1️⃣", custom_id="quoteBattle:one")
+    async def one(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        if interaction.user in self.voted_users:
+            await interaction.response.send_message("You already voted on this battle. You can't vote twice.", ephemeral=True)
+            return
+        await self._handleVote(interaction)
+        await interaction.response.send_message("Successfully voted for option 1", ephemeral=True)
+        self.score1 += 1
+        await self._wakeUp(interaction.message)
+
+    @nextcord.ui.button(style=ButtonStyle.blurple, emoji="2️⃣", custom_id="quoteBattle:two")
+    async def two(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        if interaction.user in self.voted_users:
+            await interaction.response.send_message("You already voted on this battle. You can't vote twice.", ephemeral=True)
+            return
+        await self._handleVote(interaction)
+        await interaction.response.send_message("Successfully voted for option 2", ephemeral=True)
+        self.score2 += 1
+        await self._wakeUp(interaction.message)
+
+    @nextcord.ui.button(style=ButtonStyle.grey, emoji="🗑️", custom_id="quoteBattle:bin")
+    async def bin(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        msg = "You selected the bin button. The bin simply starts the battle countdown if it hasn't yet so you don't have to vote if both quotes are crap."
+        await interaction.response.send_message(msg, ephemeral=True)
+        await self._wakeUp(interaction.message)
 
 
-def recover_quote_battle(message: nextcord.Message, conn) -> Battle:
-    embed = message.embeds[0]
-    name1 = embed.fields[0].name
-    quote1_id = int(name1.split(" | ")[1].replace("ID: ", ""))
-    name2 = embed.fields[1].name
-    quote2_id = int(name2.split(" | ")[1].replace("ID: ", ""))
-    quote1 = SQLFunctions.get_quote(quote1_id, message.guild.id, conn)
-    quote2 = SQLFunctions.get_quote(quote2_id, message.guild.id, conn)
-    battle = Battle(
-        embed=embed,
-        components=[],
-        quote1=quote1,
-        quote2=quote2,
-        rank1=-1,
-        rank2=-2,
-        pause=True
-    )
-    battle.add_message(message)
-    return battle
+def pick_top_quotes(quotes) -> tuple[tuple[int, SQLFunctions.Quote], tuple[int, SQLFunctions.Quote]]:
+    """
+    Picks two quotes that are at the top of the leaderboards
+    85% to pick 2 top 10 quotes
+    10% to pick a top 50 quote
+    5% to pick some other quote
+    """
+    n = len(quotes)
+    chance_for_first = 0.85
+    chance_for_second = 0.10
+    first_cat = 20  # amount in first category
+    second_cat = 80  # amount in second category
+    chance_for_rest = 1 - chance_for_first - chance_for_second
+    """
+    The min/max methods make sure that there are the same amount of weights
+    as there are quotes.
+    min(n, 10) = n if n<10, else it's just 10
+    min(max(0, n-10)) = 0 if n<10, else = n-10 if n<40, else its 40
+    max(0, n-50) = 0 if n<50, else it's =n-50
+    """
+    quote_weights = [chance_for_first / first_cat for _ in range(min(n, first_cat))] + \
+                    [chance_for_second / second_cat for _ in range(min(max(0, n - first_cat), second_cat))] + \
+                    [chance_for_rest / (n - first_cat - second_cat) for _ in range(max(0, n - first_cat - second_cat))]
+    return pick_random_quotes(quotes, quote_weights)
+
+
+def pick_random_quotes(quotes, quote_weights) -> tuple[tuple[int, SQLFunctions.Quote], tuple[int, SQLFunctions.Quote]]:
+    """
+    Picks two random quotes and assumes the given quotes list is order by rank.
+    :returns Two tuples each including the rank of the quote and the quote object itself.
+    """
+    # Re-raffles until we have two unique quotes
+    quotes_with_rank = [(i + 1, quotes[i]) for i in range(len(quotes))]
+    while True:
+        two_random_quotes = random.choices(quotes_with_rank, weights=quote_weights, k=2)
+        (rank1, quote1) = two_random_quotes[0]
+        (rank2, quote2) = two_random_quotes[1]
+        if quote1.Name == "test" or quote2.Name == "test":
+            continue
+        if quote1.QuoteID != quote2.QuoteID:
+            break
+    return (rank1, quote1), (rank2, quote2)
 
 
 class Quote(commands.Cog):
@@ -144,8 +320,6 @@ class Quote(commands.Cog):
         self.bot = bot
         self.time = 0
         self.conn = SQLFunctions.connect()
-        self.battle_scores = {}  # message id and score of the battle as a tuple
-        self.voted_users = {}  # dict with lists of users that voted on a battle
         channel_id = SQLFunctions.get_config("QuoteBattleChannel")
         if len(channel_id) > 0:
             channel_id = channel_id[0]
@@ -153,6 +327,9 @@ class Quote(commands.Cog):
             channel_id = -1
         self.battle_channel = self.bot.get_channel(channel_id)
         self.active_battles = []  # current active quote battles
+
+        # add persistents
+        self.bot.add_view(BattleView(self.conn))
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload):
@@ -178,65 +355,6 @@ class Quote(commands.Cog):
                 return
 
             await self.add_quote(username=user, message=message, quote=message.content, quoteAdder=quoteAdder, reactionQuote=True)
-
-    @commands.Cog.listener()
-    async def on_interaction(self, res: Interaction):
-        if res.id in ["1", "2", "3"]:
-            found_battle = None
-            # True if the message hasnt been edited in a while
-            battle_deactivated = res.message.edited_at is None or datetime.timestamp(res.message.edited_at) + 15 < datetime.timestamp(
-                datetime.utcnow())
-            if res.message.id not in self.battle_scores or res.message.id not in self.voted_users or battle_deactivated:
-                # the message ID is not in any of dicts => battle isn't active right now
-                # if the battle exists in self.active_battles, start the battle, else its simply a lost battle
-                for b in self.active_battles:
-                    if res.message.id == b.message.id:
-                        found_battle = b
-                if not found_battle:  # probably a lost battle, so we recover it
-                    found_battle = recover_quote_battle(res.message, self.conn)
-                # we only set new empty battle scores if the battle is not in cache
-                if res.message.id not in self.battle_scores or res.message.id not in self.voted_users:
-                    self.init_battle_dict(res.message, found_battle)
-                print("Reactivated battle: ", found_battle)
-
-            # the battle is ongoing, so add the vote where it belongs
-            try:
-                if res.id == "3":
-                    await res.respond(type=InteractionType.ChannelMessageWithSource,
-                                      content="You selected the bin button. The bin simply starts the battle countdown if it hasn't "
-                                              "yet so you don't have to vote if both quotes are crap.")
-                elif res.user.id in self.voted_users[res.message.id]:
-                    await res.respond(type=InteractionType.ChannelMessageWithSource,
-                                      content="You already voted on this battle. You can't vote twice.\n"
-                                              "*If this battle is bugged, try the button in ~10 seconds again. That should reactivate it again.*")
-                else:
-                    self.battle_scores[interaction.message.id][1] += 1  # increments the score
-                    self.voted_users[interaction.message.id].append(interaction.user.id)
-                    member = interaction.message.guild.get_member(interaction.user.id)
-                    if member is None:
-                        member = await interaction.message.guild.fetch_member(interaction.user.id)
-                    SQLFunctions.update_statistics(member, 0, self.conn, vote_count=1)
-                    await interaction.response.send_message("Successfully voted for option 1", ephemeral=True)
-                if found_battle:  # if this was a recovered battle, start it
-                    await self.handle_battle(res.message.channel, found_battle, 20)
-            except nextcord.errors.DiscordServerError:
-                battle = found_battle
-                if res.message.id in self.active_battles:
-                    battle = self.active_battles[res.message.id]
-                print(f"Got a DiscordServerError caught during a quote battle on battle. COUNT: {i}\n"
-                      f"\t--- {battle}")
-                await asyncio.sleep(random.randrange(i * 10, i * 20))
-            except nextcord.errors.HTTPException:
-                battle = found_battle
-                if res.message.id in self.active_battles:
-                    battle = self.active_battles[res.message.id]
-                print(f"Got a HTTPException which was caught during a quote battle on battle. COUNT: {i}\n"
-                      f"\t--- {battle}")
-                await asyncio.sleep(random.randrange(5, 8))
-            except KeyError:
-                if not res.responded:
-                    await res.respond(type=InteractionType.ChannelMessageWithSource,
-                                      content="The battle you voted on seems to have already ended.")
 
     @commands.cooldown(4, 10, BucketType.user)
     @commands.guild_only()
@@ -335,15 +453,15 @@ class Quote(commands.Cog):
                             color=0xFF0000)
                         await ctx.send(embed=embed)
                         raise nextcord.ext.commands.errors.BadArgument
-                    if index < 0 or index >= len(quotes):
+                    if index <= 0 or index > len(quotes):
                         embed = nextcord.Embed(
                             title="Quotes Error",
                             description=f"There does not exist a quote with that index for the user \"{name}\". "
-                                        f"Keep the index between `0 <= index < {len(quotes)}`.",
+                                        f"Keep the index between `0 < index <= {len(quotes)}`.",
                             color=0xFF0000)
                         await ctx.send(embed=embed)
                         raise nextcord.ext.commands.errors.BadArgument
-                    q = quotes[index]
+                    q = quotes[index-1]
                     await send_quote(ctx.channel, q)
 
                 else:  # its a new quote to add
@@ -556,12 +674,12 @@ class Quote(commands.Cog):
 
         pages = create_pages(all_quotes)
 
-        p = Pages(self.bot, ctx, pages, ctx.message.author.id, f"All quotes from {all_quotes[0].Name}", 180)
+        qm = Pages(self.bot, ctx.message, pages, f"All quotes from {all_quotes[0].Name}", 180)
         if len(pages) > 1:
-            await ctx.send(view=p)
+            qm.message = await ctx.send(embed=qm.create_embed(), view=qm)
         else:
             await ctx.message.delete(delay=120)
-            await ctx.send(embed=p.create_embed(), delete_after=120)
+            await ctx.send(embed=qm.create_embed(), delete_after=120)
 
     @quote.group(aliases=["rep"], usage="report <quote ID>", invoke_without_command=True)
     async def report(self, ctx, quoteID=None, *, reason=""):
@@ -571,7 +689,6 @@ class Quote(commands.Cog):
         """
         if ctx.invoked_subcommand is not None:
             return
-        print(f"{reason=}")
         # input parsing
         if quoteID is None:
             embed = nextcord.Embed(title="Quotes Error", description=f"No quote ID given.", color=0xFF0000)
@@ -646,7 +763,7 @@ class Quote(commands.Cog):
             return
 
         m = QuotesToRemove(pages, self.conn)
-        await m.start(ctx=ctx, channel=ctx.channel)
+        await ctx.send(embed=m.create_embed(0), view=m)
 
     @commands.guild_only()
     @quote.command(usage="search <part of quote>")
@@ -660,21 +777,7 @@ class Quote(commands.Cog):
             quotes_list += f"\n**{i}**: {formatted_quote} `[{q.QuoteID}]`"
             i += 1
             # creates the pages
-        pages = []
-        while len(quotes_list) > 0:
-            # split quotes into multiple fields of max 1000 chars
-            if len(quotes_list) >= 1000:
-                rind2 = quotes_list.rindex("\n", 0, 1000)
-                if rind2 == 0:
-                    # one quote is more than 1000 chars
-                    rind2 = quotes_list.rindex(" ", 0, 1000)
-                    if rind2 == 0:
-                        # the quote is longer than 1000 chars and has no spaces
-                        rind2 = 1000
-            else:
-                rind2 = len(quotes_list)
-            pages.append(quotes_list[0:rind2])
-            quotes_list = quotes_list[rind2:]
+        pages = create_pages(quotes)
         if len(args) > 200:
             args = args[:200] + "[...]"
         if len(pages) == 0:
@@ -683,13 +786,12 @@ class Quote(commands.Cog):
                                   color=nextcord.Color.red())
             await ctx.reply(embed=embed)
             raise nextcord.ext.commands.BadArgument
-        qm = Pages(
-            self.bot,
-            ctx,
-            pages,
-            ctx.message.author.id,
-            f"Quotes containing string: {args}")
-        await ctx.send(view=qm)
+        qm = Pages(self.bot, ctx.message, pages, f"Quotes containing string: {args}")
+        if len(pages) > 1:
+            qm.message = await ctx.send(embed=qm.create_embed(), view=qm)
+        else:
+            await ctx.send(embed=qm.create_embed(), delete_after=60)
+            await ctx.message.delete(delay=60)
 
     @commands.is_owner()
     @quote.command(name="delete", aliases=["del"], usage="delete <Quote ID>")
@@ -762,57 +864,12 @@ class Quote(commands.Cog):
             await msg.edit(content=m)
             await msg.delete()
 
-        p = Pages(self.bot, ctx, pages, ctx.message.author.id, "All Quote Names")
+        qm = Pages(self.bot, ctx.message, pages, "All Quote Names")
         if len(pages) > 1:
-            await ctx.send(view=p)
+            qm.message = await ctx.send(embed=qm.create_embed(), view=qm)
         else:
-            await ctx.send(embed=p.create_embed(), delete_after=60)
+            await ctx.send(embed=qm.create_embed(), delete_after=60)
             await ctx.message.delete(delay=60)
-
-    def pick_top_quotes(self, quotes) -> tuple[tuple[int, SQLFunctions.Quote], tuple[int, SQLFunctions.Quote]]:
-        """
-        Picks two quotes that are at the top of the leaderboards
-        85% to pick 2 top 10 quotes
-        10% to pick a top 50 quote
-        5% to pick some other quote
-        """
-        n = len(quotes)
-        chance_for_first = 0.85
-        chance_for_second = 0.10
-        first_cat = 20  # amount in first category
-        second_cat = 80  # amount in second category
-        chance_for_rest = 1 - chance_for_first - chance_for_second
-        """
-        The min/max methods make sure that there are the same amount of weights
-        as there are quotes.
-        min(n, 10) = n if n<10, else it's just 10
-        min(max(0, n-10)) = 0 if n<10, else = n-10 if n<40, else its 40
-        max(0, n-50) = 0 if n<50, else it's =n-50
-        """
-        quote_weights = [chance_for_first / first_cat for _ in range(min(n, first_cat))] + \
-                        [chance_for_second / second_cat for _ in range(min(max(0, n - first_cat), second_cat))] + \
-                        [chance_for_rest / (n - first_cat - second_cat) for _ in range(max(0, n - first_cat - second_cat))]
-        return self.pick_random_quotes(quotes, quote_weights)
-
-    def pick_random_quotes(self, quotes, quote_weights) -> tuple[tuple[int, SQLFunctions.Quote], tuple[int, SQLFunctions.Quote]]:
-        """
-        Picks two random quotes and assumes the given quotes list is order by rank.
-        :returns Two tuples each including the rank of the quote and the quote object itself.
-        """
-        # Re-raffles until we have two unique quotes
-        quotes_with_rank = [(i + 1, quotes[i]) for i in range(len(quotes))]
-        while True:
-            two_random_quotes = random.choices(quotes_with_rank, weights=quote_weights, k=2)
-            (rank1, quote1) = two_random_quotes[0]
-            (rank2, quote2) = two_random_quotes[1]
-            if quote1.Name == "test" or quote2.Name == "test":
-                continue
-            for b in self.active_battles:  # if one of the quotes is already in a battle, continue
-                if b.quote1.QuoteID in [quote1.QuoteID, quote2.QuoteID] or b.quote2.QuoteID in [quote1.QuoteID, quote2.QuoteID]:
-                    continue
-            if quote1.QuoteID != quote2.QuoteID:
-                break
-        return (rank1, quote1), (rank2, quote2)
 
     @commands.guild_only()
     @commands.is_owner()
@@ -825,9 +882,8 @@ class Quote(commands.Cog):
             raise nextcord.ext.commands.BadArgument
         count = int(count)
         for _ in range(count):
-            battle = self.init_battle_message(ctx.channel)
-            msg = await ctx.send(embed=battle.embed, components=battle.components)
-            battle.add_message(msg)
+            view = BattleView(self.conn, ctx.guild)
+            await ctx.send(embed=view.embed, view=view)
 
     def get_rank_of_quote(self, quote_id: int, guild_id: int):
         """
@@ -841,157 +897,6 @@ class Quote(commands.Cog):
             i += 1
         return -1
 
-    def init_battle_message(self, channel, time_for_battle=0) -> Battle:
-        quotes = SQLFunctions.get_quotes(conn=self.conn, guild_id=channel.guild.id, rank_by_elo=True)
-        random.seed()
-
-        PAUSE = time_for_battle == 0  # true if this battle doesnt start immediatly
-
-        if not PAUSE:
-            embed = nextcord.Embed(
-                description=f"Choose the better quote using the buttons. Battle ends after {time_for_battle} seconds.\nVotes: 0",
-                color=nextcord.Color.gold()
-            )
-        else:
-            embed = nextcord.Embed(
-                description=f"Choose the better quote using the buttons. Battle countdown starts once somebody votes.\nVotes: 0",
-                color=nextcord.Color.random()
-            )
-
-        if random.random() <= 0.1:  # there's a 5% chance for a top battle to show up
-            embed.title = "TOP QUOTE BATTLE"
-            (rank1, quote1), (rank2, quote2) = self.pick_top_quotes(quotes)
-            embed.set_thumbnail(url="https://media4.giphy.com/media/LO8oXHPum0xworIyk4/giphy.gif")
-        else:
-            embed.title = "Epic Quote Battle"
-            min_battles = 99999
-            max_battles = 0
-            for q in quotes:
-                min_battles = min(q.AmountBattled, min_battles)
-                max_battles = max(q.AmountBattled, max_battles)
-            # Tokens is what is used to give weights to quotes so quotes that have been shown less are more likely to be shown
-            tokens = max_battles - min_battles + 1
-            quote_weights = [tokens - x.AmountBattled for x in quotes]
-            (rank1, quote1), (rank2, quote2) = self.pick_random_quotes(quotes, quote_weights)
-
-        quote1_text = quote1.QuoteText
-        quote2_text = quote2.QuoteText
-        if len(quote1_text) > 1000:
-            quote1_text = quote1_text[:1000] + " **[...]**"
-        if len(quote2_text) > 1000:
-            quote2_text = quote2_text[:1000] + " **[...]**"
-
-        embed.add_field(name=f"1️⃣ | ID: {quote1.QuoteID} | Name: {quote1.Name}", value=quote1_text, inline=False)
-        embed.add_field(name=f"2️⃣ | ID: {quote2.QuoteID} | Name: {quote2.Name}", value=quote2_text, inline=False)
-        embed.set_footer(text="The bin button simply starts the battle if it hasn't started yet.")
-        components = [[
-            Button(style=ButtonStyle.blue, emoji="1️⃣", id="1"),
-            Button(style=ButtonStyle.blue, emoji="2️⃣", id="2"),
-            Button(style=ButtonStyle.grey, emoji="🗑️", id="3")
-        ]]
-        battle = Battle(
-            embed=embed,
-            components=components,
-            quote1=quote1,
-            quote2=quote2,
-            rank1=rank1,
-            rank2=rank2,
-            pause=PAUSE
-        )
-        return battle
-
-    def init_battle_dict(self, msg, battle):
-        self.active_battles.append(battle)
-        battle.add_message(msg)
-        self.voted_users[msg.id] = []
-        self.battle_scores[msg.id] = [0, 0]
-
-    async def handle_battle(self, channel: nextcord.TextChannel, battle: Battle, time_for_battle=30, user_message=None):
-        """
-        Handles the whole quote battle including picking the quotes, sending the message,
-        editing it and deleting the messages afterwards.
-        """
-        if battle.message is None:
-            raise Exception("Message is unassigned for battle")
-
-        quote1 = battle.quote1
-        quote2 = battle.quote2
-        embed = battle.embed
-        rank1 = battle.rank1
-        rank2 = battle.rank2
-        msg = battle.message
-
-        if battle.pause:  # the battle was paused, so we have to get the new ranks of the quotes incase they changed
-            rank1 = self.get_rank_of_quote(quote1.QuoteID, channel.guild.id)
-            rank2 = self.get_rank_of_quote(quote2.QuoteID, channel.guild.id)
-
-        start_time = time.time()
-        while start_time + time_for_battle > time.time():
-            embed.description = f"Choose the better quote using the buttons. Battle ending in {int(start_time + time_for_battle - time.time())} seconds.\nVotes: {len(self.voted_users[msg.id])}"
-            await msg.edit(embed=embed)
-            await asyncio.sleep(5)
-
-        embed = nextcord.Embed(
-            title=embed.title + " Over",
-            description=f"Quote Battle over. There were {len(self.voted_users[msg.id])} intense battles.",
-            color=nextcord.Color.gold()
-        )
-
-        score1, score2 = self.battle_scores[msg.id]
-        set_new_elo(score1, score2, quote1, quote2, self.conn)
-
-        # gets the new ranks
-        quotes = SQLFunctions.get_quotes(conn=self.conn, guild_id=channel.guild.id, rank_by_elo=True)
-        new_rank1 = 0
-        new_rank2 = 0
-        for i, q in enumerate(quotes):
-            if q.QuoteID == quote1.QuoteID:
-                new_rank1 = i + 1
-            elif q.QuoteID == quote2.QuoteID:
-                new_rank2 = i + 1
-            if new_rank1 != 0 and new_rank2 != 0:
-                break
-
-        quote1_text = quote1.QuoteText
-        quote2_text = quote2.QuoteText
-        if len(quote1_text) > 1000:
-            quote1_text = quote1_text[:1000] + " **[...]**"
-        if len(quote2_text) > 1000:
-            quote2_text = quote2_text[:1000] + " **[...]**"
-
-        # remove all entries that were created again
-        if battle in self.active_battles:
-            self.active_battles.remove(battle)
-        self.voted_users.pop(msg.id)
-        self.battle_scores.pop(msg.id)
-
-        embed.add_field(name=f"1️⃣ | ID: {quote1.QuoteID} | Name: {quote1.Name} | Rank: {rank1} → {new_rank1} | Wins: {score1}",
-                        value=quote1_text, inline=False)
-        embed.add_field(name=f"2️⃣ | ID: {quote2.QuoteID} | Name: {quote2.Name} | Rank: {rank2} → {new_rank2} | Wins: {score2}",
-                        value=quote2_text, inline=False)
-        await msg.edit(embed=embed, components=[])
-
-        try:
-            await msg.delete(delay=60)
-        except (nextcord.NotFound, nextcord.Forbidden):
-            pass
-        if user_message is not None:
-            try:
-                await user_message.delete(delay=60)
-            except (nextcord.NotFound, nextcord.Forbidden):
-                pass
-
-        # automatically sends the battle again once it ends if its in the battle channel
-        if self.battle_channel is not None and channel.id == self.battle_channel.id:
-            battle = self.init_battle_message(channel)
-            for _ in range(10):
-                try:
-                    msg = await channel.send(embed=battle.embed, components=battle.components)
-                    break
-                except nextcord.errors.DiscordServerError:
-                    await asyncio.sleep(5)
-            battle.add_message(msg)
-
     @commands.cooldown(4, 15, BucketType.channel)
     @commands.guild_only()
     @quote.command(aliases=["b"], usage="battle")
@@ -1000,10 +905,9 @@ class Quote(commands.Cog):
         Picks two random quotes and allows users to vote on which quote they find better. \
         Each vote from a user counts as a win for that quote and immediately takes effect.
         """
-        battle = self.init_battle_message(ctx.channel, 30)
-        msg: nextcord.Message = await ctx.send(embed=battle.embed, components=battle.components)
-        self.init_battle_dict(msg, battle)
-        await self.handle_battle(ctx.channel, battle, 30, ctx.message)
+        view = BattleView(self.conn, ctx.guild)
+        await ctx.message.delete(delay=30)
+        await ctx.send(embed=view.embed, view=view)
 
     @commands.guild_only()
     @quote.command(aliases=["lb", "top"], usage="leaderboard [user ID | mention]")
@@ -1021,8 +925,13 @@ class Quote(commands.Cog):
                 await ctx.reply(f"Did not find any quotes from the given user.")
                 raise nextcord.ext.commands.errors.BadArgument
             title = f"Quote Leaderboard from {quotes[0].Name}"
-        qm = Pages(self.bot, ctx, create_pages(quotes), ctx.message.author.id, title)
-        await ctx.send(view=qm)
+        pages = create_pages(quotes)
+        qm = Pages(self.bot, ctx.message, pages, title)
+        if len(pages) > 1:
+            qm.message = await ctx.send(embed=qm.create_embed(), view=qm)
+        else:
+            await ctx.send(embed=qm.create_embed(), delete_after=60)
+            await ctx.message.delete(delay=60)
 
     @commands.guild_only()
     @quote.group(aliases=["f", "favorite", "favourite", "favourites"], usage="favorites", invoke_without_command=True)
@@ -1044,8 +953,12 @@ class Quote(commands.Cog):
             raise nextcord.ext.commands.errors.BadArgument
 
         pages = create_pages(quotes)
-        qm = Pages(self.bot, ctx, pages, ctx.author.id, "Favorite Quotes")
-        await ctx.send(view=qm)
+        qm = Pages(self.bot, ctx.message, pages, "Favorite Quotes")
+        if len(pages) > 1:
+            qm.message = await ctx.send(embed=qm.create_embed(), view=qm)
+        else:
+            await ctx.send(embed=qm.create_embed(), delete_after=60)
+            await ctx.message.delete(delay=60)
 
     @commands.guild_only()
     @favorites.command(name="add", aliases=["a"], usage="add <quote ID>")
@@ -1141,18 +1054,12 @@ def setup(bot):
     bot.add_cog(Quote(bot))
 
 
-class QuotesToRemove(menus.Menu):
+class QuotesToRemove(nextcord.ui.View):
     def __init__(self, pages, conn):
-        super().__init__(clear_reactions_after=True, delete_message_after=True)
+        super().__init__()
         self.pages = pages
         self.page_count = 0
-        self.ctx = None
         self.conn = conn
-
-    async def send_initial_message(self, ctx, channel):
-        embed = self.create_embed(self.page_count)
-        self.ctx = ctx
-        return await ctx.send(embed=embed)
 
     def create_embed(self, page_number):
         embed = nextcord.Embed(title="Quotes to Remove", description=f"Page {page_number + 1}/{len(self.pages)}", color=0x00003f)
@@ -1168,71 +1075,62 @@ class QuotesToRemove(menus.Menu):
             embed.add_field(name=f"ID: {quoteID} | {name}", value="Reported by: <@{reporterID}>\n**Quote:**\n{quote}\n**Reason:**\n{reason}")
         return embed
 
-    @menus.button("⬅️")
-    async def page_down(self, payload):
+    @nextcord.ui.button(label="<", style=ButtonStyle.blurple)
+    async def page_down(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         self.page_count = (self.page_count - 1) % len(self.pages)
         embed = self.create_embed(self.page_count)
-        await self.message.edit(embed=embed)
+        await interaction.response.edit_message(embed=embed)
 
-    @menus.button("➡️")
-    async def page_up(self, payload):
+    @nextcord.ui.button(label=">", style=ButtonStyle.blurple)
+    async def page_up(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         self.page_count = (self.page_count + 1) % len(self.pages)
         embed = self.create_embed(self.page_count)
-        await self.message.edit(embed=embed)
+        await interaction.response.edit_message(embed=embed)
 
-    @menus.button("❌")
-    async def delete(self, payload):
-        if self.ctx is not None:
-            # if the message was already deleted
-            # this seems to throw an error
-            # and then the quote msg can't be deleted
-            try:
-                await self.ctx.message.delete()
-            except:
-                pass
+    @nextcord.ui.button(label="Close Menu", style=ButtonStyle.grey)
+    async def delete(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        try:
+            await interaction.message.delete()
+        except (nextcord.NotFound, nextcord.Forbidden):
+            pass
+        await interaction.response.defer()
         self.stop()
 
-    @menus.button("<:DeletThis:843908352999686234>")
-    async def deleteQuote(self, payload):
+    @nextcord.ui.button(label="Ignore", style=ButtonStyle.grey)
+    async def ignoreQuote(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        userID, quoteID, quote, reporterID, name, reason = self.pages[self.page_count]
+        SQLFunctions.delete_quote_to_remove(quoteID, self.conn)
+        self.pages.pop(self.page_count)
+        embed = nextcord.Embed(title="Ignored Quote", description=f"Quote with ID {quoteID} was ignored.", color=0xffff00)
+        embed.add_field(name="Quote", value=quote)
+        await interaction.channel.send(content=f"Reported by <@{reporterID}>", embed=embed)
+        await self._isDone(interaction)
+
+    @nextcord.ui.button(label="Delete", style=ButtonStyle.danger)
+    async def deleteQuote(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
         userID, quoteID, quote, reporterID, name, reason = self.pages[self.page_count]
         SQLFunctions.delete_quote(quoteID, self.conn)
         self.pages.pop(self.page_count)
         embed = nextcord.Embed(title="Deleted Quote", description=f"Quote with ID {quoteID} was YEEEEEETED.", color=0xffff00)
         embed.add_field(name="Quote", value=quote)
-        await self.ctx.send(content=f"Reported by <@{reporterID}>", embed=embed)
+        await interaction.channel.send(content=f"Reported by <@{reporterID}>", embed=embed)
+        await self._isDone(interaction)
 
+    async def _isDone(self, interaction: nextcord.Interaction):
         if len(self.pages) == 0:
             embed = nextcord.Embed(title="Cleansing is done", description=f"All reported quotes were yeeted.", color=0xffff00)
-            await self.ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
             self.stop()
             return
         # get new page
         self.page_count = self.page_count % len(self.pages)
         embed = self.create_embed(self.page_count)
-        await self.message.edit(embed=embed)
-
-    @menus.button("<a:IgnoreReport:844678929751212083>")
-    async def ignoreQuote(self, payload):
-        userID, quoteID, quote, reporterID, name, reason = self.pages[self.page_count]
-        SQLFunctions.delete_quote_to_remove(quoteID, self.conn)
-        self.pages.pop(self.page_count)
-        embed = nextcord.Embed(title="Ignored Quote", description=f"Quote with ID {quoteID} was ignored.", color=0xffff00)
-        await self.ctx.send(content=f"Reported by <@{reporterID}>", embed=embed)
-
-        if len(self.pages) == 0:
-            embed = nextcord.Embed(title="Cleansing is done", description=f"All reported quotes were yeeted.", color=0xffff00)
-            await self.ctx.send(embed=embed)
-            self.stop()
-            return
-        # get new page
-        self.page_count = self.page_count % len(self.pages)
-        embed = self.create_embed(self.page_count)
-        await self.message.edit(embed=embed)
+        await interaction.response.edit_message(embed=embed)
 
 
-def create_pages(quotes: list[SQLFunctions.Quote]) -> list[str]:
+def create_pages(quotes: list[SQLFunctions.Quote], startIndex=1) -> list[str]:
     quotes_list = ""
-    i = 1
+    i = startIndex
     for q in quotes:
         quote_to_add = q.QuoteText.replace("*", "").replace("~", "").replace("\\", "").replace("`", "").replace("||", "")
         if quote_to_add.count("\n") > 2:
@@ -1263,17 +1161,17 @@ def create_pages(quotes: list[SQLFunctions.Quote]) -> list[str]:
 
 
 class Pages(nextcord.ui.View):
-    def __init__(self, bot: nextcord.Client, ctx: nextcord.ext.commands.Context, pages: list, user_id: int, embed_title: str, seconds=60, description=""):
+    def __init__(self, bot: nextcord.Client, message: nextcord.Message, pages: list, embed_title: str, seconds=60, description=""):
         super().__init__()
         self.bot = bot  # bot object required so we can wait for the button click
-        self.ctx = ctx  # so that we can remove the original message in the end
         self.page_count = 0  # current page
         self.pages = pages  # list of strings
         self.start_time = time.time()
-        self.user_id = user_id  # the user ID that can change the pages
+        self.user = message.author  # the user that can change the pages
         self.embed_title = embed_title  # the title of each page
-        self.seconds = seconds  # time in seconds to wait until we delete the message
-        self.message = None  # the quotes message sent by the bot
+        self.timeout = seconds  # time in seconds to wait until we delete the message
+        self.user_message = message  # the message sent by the user
+        self.message = None  # the bot message
         self.description = description  # description of the embed
 
     def disable_buttons(self):
@@ -1282,7 +1180,10 @@ class Pages(nextcord.ui.View):
         it's the first or last page, some buttons will be disabled.
         """
         for button in self.children:
+            button: nextcord.ui.Button
             button.disabled = False
+            if button.label == "X":
+                continue
             button.style = ButtonStyle.blurple
             if self.page_count == len(self.pages) - 1 and button.label in [">", ">>"] or self.page_count == 0 and button.label in ["<", "<<"]:
                 button.disabled = True
@@ -1297,30 +1198,55 @@ class Pages(nextcord.ui.View):
         if len(self.description) > 0:
             embed.description = self.description
         embed.add_field(name=f"Page {self.page_count + 1} / {len(self.pages)}", value=self.pages[self.page_count])
-        embed.set_author(name=str(self.ctx.message.author), icon_url=self.ctx.message.author.display_avatar.url)
+        embed.set_author(name=str(self.user), icon_url=self.user.display_avatar.url)
         if len(self.pages) > 1:
             embed.set_footer(text="<< first page | < prev page | ❌ delete message | > next page | >> last page")
         return embed
 
-    @nextcord.ui.button(label="<", style=ButtonStyle.blurple)
+    @nextcord.ui.button(label="<<", style=ButtonStyle.grey, disabled=True)
+    async def first_page(self, button: nextcord.ui.Button, interaction: nextcord.Interaction) -> None:
+        """
+        Heads to the first page
+        """
+        if interaction.user != self.user:
+            await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
+            return
+        self.page_count = 0
+        self.disable_buttons()
+        embed = self.create_embed()
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @nextcord.ui.button(label="<", style=ButtonStyle.grey, disabled=True)
     async def page_down(self, button: nextcord.ui.Button, interaction: nextcord.Interaction) -> None:
         """
         Goes down a page
         """
-        if interaction.user.id != self.user_id:
+        if interaction.user != self.user:
             await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
             return
         self.page_count = (self.page_count - 1) % len(self.pages)
         self.disable_buttons()
         embed = self.create_embed()
-        await self.message.edit(embed=embed)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @nextcord.ui.button(label="X", style=ButtonStyle.red)
+    async def closeMenu(self, button: nextcord.ui.Button, interaction: nextcord.Interaction):
+        if interaction.user != self.user:
+            await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
+            return
+        await interaction.message.delete()
+        try:
+            await self.user_message.delete()
+        except (nextcord.NotFound, nextcord.Forbidden):
+            pass
+        self.stop()
 
     @nextcord.ui.button(label=">", style=ButtonStyle.blurple)
     async def page_up(self, button: nextcord.ui.Button, interaction: nextcord.Interaction) -> None:
         """
         Goes up a page
         """
-        if interaction.user.id != self.user_id:
+        if interaction.user != self.user:
             await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
             return
         self.page_count = (self.page_count + 1) % len(self.pages)
@@ -1333,7 +1259,7 @@ class Pages(nextcord.ui.View):
         """
         Heads to the last page
         """
-        if interaction.user.id != self.user_id:
+        if interaction.user != self.user:
             await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
             return
         self.page_count = len(self.pages) - 1
@@ -1341,22 +1267,13 @@ class Pages(nextcord.ui.View):
         embed = self.create_embed()
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @nextcord.ui.button(label="<<", style=ButtonStyle.blurple)
-    async def first_page(self, button: nextcord.ui.Button, interaction: nextcord.Interaction) -> None:
-        """
-        Heads to the first page
-        """
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
-            return
-        self.page_count = 0
-        self.disable_buttons()
-        embed = self.create_embed()
-        await self.message.edit(embed=embed)
+    async def on_timeout(self) -> None:
+        if self.message is not None:
+            await self.message.delete()
+        try:
+            await self.user_message.delete()
+        except (nextcord.NotFound, nextcord.Forbidden):
+            pass
 
-    @nextcord.ui.button(label="X", style=ButtonStyle.red)
-    async def closeMenu(self, button, interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This page wasn't called by you.", ephemeral=True)
-            return
-        self.stop()
+
+
