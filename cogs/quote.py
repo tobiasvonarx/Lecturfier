@@ -342,7 +342,7 @@ class Quote(commands.Cog):
         user = str(message.author.id)
         quoteAdder = payload.member
         emoji = payload.emoji
-        if str(emoji) == "<:addQuote:840982832654712863>":
+        if "addquote" in str(emoji).lower():
             # We first check if the channel is an announcement channel
             # To avoid unecessary queries
             if channel.type == nextcord.ChannelType.news:
@@ -527,7 +527,7 @@ class Quote(commands.Cog):
                 color=0xFF0000)
             if reactionQuote:
                 try:
-                    await message.add_reaction("<:tooLongQuote:852876951407820820>")
+                    await message.add_reaction("<:tooLongQuote:944975187034669076>")
                 except nextcord.errors.Forbidden:
                     pass
             else:
@@ -545,7 +545,7 @@ class Quote(commands.Cog):
                 color=0xFF0000)
             if reactionQuote:
                 try:
-                    await message.add_reaction("<:blockedFromQuoting:840988109578698782>")
+                    await message.add_reaction("<:blockedFromQuoting:944975250976833536>")
                 except nextcord.errors.Forbidden:
                     pass
             else:
@@ -572,7 +572,7 @@ class Quote(commands.Cog):
             embed.set_footer(text="(Or your username is the same as the person you're trying to quote.)")
             if reactionQuote:
                 try:
-                    await message.add_reaction("<:selfQuote:852877064515092520>")
+                    await message.add_reaction("<:selfQuote:944975293809049671>")
                 except nextcord.errors.Forbidden:
                     pass
             else:
@@ -606,7 +606,7 @@ class Quote(commands.Cog):
 
         if reactionQuote:
             try:
-                await message.add_reaction("<:addedQuote:840985556304265237>")
+                await message.add_reaction("<:addedQuote:944973430619529216>")
             except nextcord.errors.NotFound:
                 pass
 
@@ -860,7 +860,7 @@ class Quote(commands.Cog):
 
         # sends the initial message, then edits it to a mention message and deletes it afterwards
         for m in messages_to_send:
-            msg = await ctx.send("mentions go brrrrrrr <a:partypoop:412336219175780353>")
+            msg = await ctx.send("mentions go brrrrrrr <a:partypoop:944975859037650954>")
             await msg.edit(content=m)
             await msg.delete()
 
